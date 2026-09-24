@@ -5,6 +5,72 @@ follows [Keep a Changelog](https://keepachangelog.com/).
 
 ---
 
+## [v1.3.1] — Multi-GPU auto-detect build (T4 / A100 / L4 / RTX / H100)
+
+No more manually editing `CUDA_ARCH` every time you switch GPU type in
+Colab or Kaggle. One prebuilt tarball now covers every GPU generation
+these notebooks are likely to run on, and the consumer notebooks detect
+your hardware automatically.
+
+### Added
+- **Fat multi-arch CUDA build.** `Build-Llama-CUDA-Release.py` now compiles
+  native code for Turing (T4, `sm_75`), Ampere-DC (A100, `sm_80`), Ampere
+  (RTX 30-series, `sm_86`), Ada (L4 / RTX 40-series, `sm_89`), and Hopper
+  (H100, `sm_90`) into a single tarball, plus an `sm_90` PTX ("virtual")
+  entry so GPUs newer than Hopper can still run it via the driver's JIT
+  instead of requiring a rebuild.
+- **Runtime GPU auto-detection** in `Collab-Llama.py` and `Kaggle-Llama.py`
+  (`detect_gpu_arch()`), reading compute capability straight from
+  `nvidia-smi`. `CUDA_ARCH` is no longer a hardcoded config value — it's
+  resolved automatically before anything else runs.
+- **Coverage-aware prebuilt verification.** `verify_prebuilt()` now checks
+  whether the detected GPU is covered by the tarball's embedded arch list
+  (native match, or new enough for the PTX forward-compat entry to JIT)
+  instead of requiring an exact single-arch string match. A prebuilt from
+  before this update, or one that genuinely doesn't cover the attached GPU,
+  is rejected with a clear reason and the notebook falls back to compiling
+  from source for that GPU's specific arch.
+- `VERSION.txt` now records a `cuda_archs` field (semicolon-separated,
+  `-real`/`-virtual` tagged) instead of a single `cuda_arch` value, plus a
+  `cuda_archs_human` line for quick eyeballing.
+
+### Fixed
+- **Critical: `CMAKE_CUDA_ARCHITECTURES` value was silently truncated to
+  the first architecture.** The cmake invocation is run through a shell,
+  and the semicolon-separated arch list (`75-real;80-real;86-real;...`)
+  was passed unquoted — so the shell parsed everything after the first
+  semicolon as separate commands (`80-real: not found`, `86-real: not
+  found`, etc.) instead of one argument. Only `sm_75` ever actually got
+  built, silently. Fixed by quoting the value
+  (`-DCMAKE_CUDA_ARCHITECTURES="{CUDA_ARCH}"`), confirmed to affect every
+  multi-arch build produced before this patch.
+- **`find_cuda_driver_lib()` missed the driver library location on some
+  Kaggle images.** `nvidia-smi` succeeds (kernel driver is loaded), but no
+  `libcuda.so`/`libcuda.so.1` existed in any of the previously-checked
+  toolkit/system paths, so the CUDA configure step failed at
+  `target_link_libraries(ggml-cuda ... CUDA::cuda_driver)` with "target not
+  found" — and the `GGML_CUDA_NO_VMM=ON` retry hit the identical error,
+  since that flag doesn't actually drop the driver-link requirement in this
+  llama.cpp revision. Added the `nvidia-container-toolkit` mount paths
+  (`/usr/local/nvidia/lib64`, `/usr/lib/nvidia`, etc.) to the search list,
+  plus a bounded filesystem sweep as a last resort before giving up.
+
+### Changed
+- Prebuilt tarball naming: `llama-cuda-sm{N}-{tag}.tar.gz` →
+  `llama-cuda-multiarch-{tag}.tar.gz` (one asset now serves every GPU type
+  instead of one asset per arch).
+- Build time for `Build-Llama-CUDA-Release.py` increases from ~5-10 min
+  (single arch) to ~15-25 min (five archs + PTX) — paid once per
+  `LLAMA_CPP_TAG` bump, not per notebook run.
+
+### Migration notes
+- Re-run `Build-Llama-CUDA-Release.py` and re-upload the resulting tarball
+  — old single-arch releases won't satisfy the new coverage check on any
+  GPU other than the one they were originally built for.
+- Update `GITHUB_RELEASE_URL` in `Collab-Llama.py` / `Kaggle-Llama.py` to
+  point at the new `llama-cuda-multiarch-*.tar.gz` asset.
+- No other config changes needed — `CUDA_ARCH` is auto-managed from here on.
+
 ## [v1.0.0] — llama.cpp migration + stability pass
 
 ### Added

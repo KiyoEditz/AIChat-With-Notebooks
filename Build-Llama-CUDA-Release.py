@@ -5,9 +5,20 @@ One-time builder: produces a portable, self-contained llama-server (CUDA)
 tarball you upload to your own GitHub Release, so future Kaggle/Colab runs
 can download a prebuilt binary instead of compiling from source every time.
 
-Run this ONCE, on Kaggle (T4), whenever you want a new build (e.g. after
-bumping LLAMA_CPP_TAG). It does NOT start a chat server and does NOT need
-a model download -- it only builds + packages the binary.
+## Multi-GPU support (fat binary, no more per-arch rebuilds)
+This build embeds native (SASS) code for EVERY GPU generation these
+notebooks might run on -- T4, A100, RTX 30xx/40xx, L4, H100 -- in a single
+tarball, plus a PTX ("virtual") fallback for the newest arch so even GPUs
+released after this build (e.g. a future Blackwell RTX 50xx) can still run
+it via the driver's PTX JIT instead of needing a rebuild. The consumer
+notebooks (Collab-Llama.py / Kaggle-Llama.py) auto-detect whichever GPU
+they're actually running on and verify it's covered -- you never edit
+CUDA_ARCH by hand again when switching between T4 / L4 / A100 / RTX / etc.
+
+Run this ONCE, on Kaggle (any GPU is fine -- building a fat binary doesn't
+require the target hardware to be present), whenever you want a new build
+(e.g. after bumping LLAMA_CPP_TAG). It does NOT start a chat server and
+does NOT need a model download -- it only builds + packages the binary.
 
 ## Why this exists
 ggml-org/llama.cpp does not publish an official prebuilt Linux+CUDA binary
@@ -43,14 +54,30 @@ import subprocess, time, os, sys, shutil, hashlib, tarfile, glob
 
 LLAMA_CPP_TAG = "b10605"
 
-# T4 = compute capability 7.5. If you also plan to run this build on other
-# GPUs later, add more archs semicolon-separated, e.g. "75;86" -- but that
-# increases build time and binary size, and this project's notebooks only
-# ever run on T4s, so 75-only keeps this fast and small on purpose.
-CUDA_ARCH = "75"
+# Fat multi-arch build: real (SASS) code for every GPU generation these
+# notebooks are known to run on, plus a PTX ("virtual") entry on the newest
+# one for forward compatibility with GPUs released after this build.
+#   75 = Turing     (T4, RTX 20xx)
+#   80 = Ampere DC  (A100)
+#   86 = Ampere     (RTX 30xx, A10/A40)
+#   89 = Ada        (L4, RTX 40xx)
+#   90 = Hopper     (H100) -- also embedded as PTX ("-virtual") so a future
+#                             arch newer than Hopper can still JIT-compile
+#                             against it instead of hard-failing.
+# This takes longer to compile (~15-25 min vs ~5-10 for a single arch) and
+# produces a bigger binary, but you only pay that cost ONCE per
+# LLAMA_CPP_TAG bump -- every consumer notebook after that auto-detects its
+# GPU and just works, no manual CUDA_ARCH editing ever again.
+CUDA_ARCH = "75-real;80-real;86-real;89-real;90-real;90-virtual"
 
-BUILD_DIR = "/kaggle/working/llama.cpp" if os.path.isdir("/kaggle/working") else "/tmp/llama.cpp"
-OUTPUT_DIR = "/kaggle/working" if os.path.isdir("/kaggle/working") else "/tmp"
+if os.path.isdir("/kaggle/working"):
+    OUTPUT_DIR = "/kaggle/working"
+elif os.path.isdir("/content"):
+    OUTPUT_DIR = "/content"
+else:
+    OUTPUT_DIR = "/tmp"
+
+BUILD_DIR = f"{OUTPUT_DIR}/llama.cpp"
 
 # ── Utility functions (same shapes as the other notebook scripts) ───
 
@@ -88,8 +115,8 @@ def find_cuda_driver_lib():
     'libcuda.so' exists in one of its search paths. Kaggle/Colab GPU images
     ship the CUDA *toolkit* without the driver stub package
     (cuda-driver-dev-*), and the real driver is injected by the NVIDIA
-    container runtime as a versioned 'libcuda.so.1' with no unversioned dev
-    symlink. So the target never gets created, and llama.cpp's
+    container runtime as a versioned 'libcuda.so.1' (commonly at
+    /usr/local/nvidia/lib64). So the target never gets created, and llama.cpp's
     `target_link_libraries(ggml-cuda PRIVATE CUDA::cuda_driver)` blows up the
     CMake *generate* step with "but the target was not found".
 
@@ -98,7 +125,7 @@ def find_cuda_driver_lib():
     """
     cuda_home = os.environ.get("CUDA_HOME") or os.environ.get("CUDA_PATH") or "/usr/local/cuda"
     dirs = []
-    for base in (cuda_home, "/usr/local/cuda"):
+    for base in [cuda_home, "/usr/local/cuda"] + sorted(glob.glob("/usr/local/cuda*")):
         dirs += [
             f"{base}/lib64/stubs",
             f"{base}/lib/stubs",
@@ -106,7 +133,27 @@ def find_cuda_driver_lib():
             f"{base}/lib64",
             f"{base}/targets/x86_64-linux/lib",
         ]
-    dirs += ["/usr/lib/x86_64-linux-gnu", "/usr/lib64", "/usr/lib"]
+    dirs += [
+        "/usr/local/nvidia/lib64",
+        "/usr/local/nvidia/lib",
+        "/usr/lib/x86_64-linux-gnu",
+        "/usr/lib64",
+        "/usr/lib",
+        "/lib/x86_64-linux-gnu",
+        "/lib64",
+        "/lib",
+    ]
+    for p in os.environ.get("LD_LIBRARY_PATH", "").split(":"):
+        if p.strip():
+            dirs.append(p.strip())
+
+    seen = set()
+    unique_dirs = []
+    for d in dirs:
+        if d and d not in seen:
+            seen.add(d)
+            unique_dirs.append(d)
+    dirs = unique_dirs
 
     # Prefer an unversioned stub / dev symlink: linking against the toolkit
     # stub is the standard way to build a portable CUDA binary, since it only
@@ -131,6 +178,17 @@ def find_cuda_driver_lib():
         for line in r.stdout.splitlines():
             if "libcuda.so" in line and "=>" in line:
                 versioned.append(line.split("=>")[-1].strip())
+
+    if not versioned:
+        r = sh("find /usr/local /usr/lib /lib -name 'libcuda.so*' 2>/dev/null", check=False, capture=True)
+        if r.returncode == 0:
+            for line in r.stdout.splitlines():
+                candidate = line.strip()
+                if os.path.isfile(candidate):
+                    if candidate.endswith("/libcuda.so"):
+                        return candidate, False
+                    versioned.append(candidate)
+
     for p in versioned:
         if os.path.isfile(p):
             return p, True
@@ -196,7 +254,7 @@ r = sh("cmake --version", check=False, capture=True)
 print(f"  {r.stdout.splitlines()[0] if r.returncode == 0 else 'cmake install failed'}")
 
 # ── 3. CLONE + BUILD ──────────────────────────────────────────────
-section(3, TOTAL, f"Clone + Build llama.cpp @ {LLAMA_CPP_TAG} (sm_{CUDA_ARCH})")
+section(3, TOTAL, f"Clone + Build llama.cpp @ {LLAMA_CPP_TAG} (multi-arch: {CUDA_ARCH})")
 
 def clone_step():
     sh(f"rm -rf {BUILD_DIR}", check=False, quiet=True)
@@ -219,10 +277,10 @@ def configure(extra_flags):
     # CMakeCache.txt behind with the NOTFOUND driver lookup cached in it.
     sh(f"rm -rf {BUILD_DIR}/build", check=False, quiet=True)
     return sh(
-        f"cmake -B {BUILD_DIR}/build -S {BUILD_DIR} "
-        f"-DGGML_CUDA=ON -DCMAKE_CUDA_ARCHITECTURES={CUDA_ARCH} "
-        f"-DCMAKE_BUILD_TYPE=Release "
-        f"-DLLAMA_BUILD_TESTS=OFF -DLLAMA_BUILD_EXAMPLES=OFF "
+        f'cmake -B {BUILD_DIR}/build -S {BUILD_DIR} '
+        f'-DGGML_CUDA=ON -DCMAKE_CUDA_ARCHITECTURES="{CUDA_ARCH}" '
+        f'-DCMAKE_BUILD_TYPE=Release '
+        f'-DLLAMA_BUILD_TESTS=OFF -DLLAMA_BUILD_EXAMPLES=OFF '
         + " ".join(extra_flags),
         check=False,
     ).returncode == 0
@@ -240,7 +298,7 @@ if not configure(driver_flags):
     print("  \u26a0\ufe0f Configure failed with the CUDA driver library -- retrying with "
           "GGML_CUDA_NO_VMM=ON (skips the libcuda.so link requirement).")
     cuda_vmm = False
-    if not configure(driver_flags + ["-DGGML_CUDA_NO_VMM=ON"]):
+    if not configure(["-DGGML_CUDA_NO_VMM=ON"]):
         print("  \u274c CMake configure failed even with VMM disabled -- see the log above.")
         sys.exit(1)
 print(f"  \u2705 Configured (CUDA VMM: {'on' if cuda_vmm else 'off'})")
@@ -292,7 +350,7 @@ else:
     for p in project_libs:
         print(f"    - {os.path.basename(p)}")
 
-pkg_name = f"llama-cuda-sm{CUDA_ARCH}-{LLAMA_CPP_TAG}"
+pkg_name = f"llama-cuda-multiarch-{LLAMA_CPP_TAG}"
 pkg_dir = f"/tmp/{pkg_name}"
 sh(f"rm -rf {pkg_dir}", check=False, quiet=True)
 os.makedirs(f"{pkg_dir}/lib", exist_ok=True)
@@ -322,7 +380,14 @@ built_at = time.strftime("%Y-%m-%d %H:%M:%S UTC", time.gmtime())
 version_txt = (
     f"llama_cpp_tag={LLAMA_CPP_TAG}\n"
     f"commit={commit_hash}\n"
-    f"cuda_arch=sm_{CUDA_ARCH}\n"
+    # Raw archs string, parsed by the consumer notebooks' verify_prebuilt()
+    # to check "is THIS GPU covered?" -- semicolon-separated, each entry
+    # tagged -real (native SASS) or -virtual (PTX, JIT-compiled at load
+    # time for that arch or newer).
+    f"cuda_archs={CUDA_ARCH}\n"
+    f"cuda_archs_human=Turing(T4/RTX20xx)=75 Ampere-DC(A100)=80 "
+    f"Ampere(RTX30xx)=86 Ada(L4/RTX40xx)=89 Hopper(H100)=90 "
+    f"PTX-forward-compat-from=90\n"
     f"cuda_vmm={'on' if cuda_vmm else 'off'}\n"
     f"built_on_gpu={gpu_name}\n"
     f"nvcc={nvcc_version}\n"
@@ -353,26 +418,32 @@ print(f"  \u2705 Checksum: {sha_path}")
 # ── 6. UPLOAD INSTRUCTIONS ─────────────────────────────────────────
 section(6, TOTAL, "Next Steps: Upload to GitHub Releases")
 print(f"""
-  1. Buka tab 'Output' notebook Kaggle ini, unduh 2 file berikut:
+  1. Unduh 2 file berikut dari output notebook (tab 'Output' di Kaggle, atau panel Files di Colab):
        - {os.path.basename(tarball_path)}
        - {os.path.basename(sha_path)}
 
   2. Di GitHub repo kamu:
        Releases -> Draft a new release
-       -> Tag: llama-cuda-{LLAMA_CPP_TAG}  (atau tag lain sesukamu)
+       -> Tag: llama-cuda-multiarch-{LLAMA_CPP_TAG}  (atau tag lain sesukamu)
        -> Attach both files sebagai release assets
        -> Publish release
 
   3. Salin URL release asset (klik kanan file -> Copy link) -- bentuknya:
-       https://github.com/<user>/<repo>/releases/download/llama-cuda-{LLAMA_CPP_TAG}/{os.path.basename(tarball_path)}
+       https://github.com/<user>/<repo>/releases/download/llama-cuda-multiarch-{LLAMA_CPP_TAG}/{os.path.basename(tarball_path)}
 
   4. Tempel URL itu ke GITHUB_RELEASE_URL di Collab-Llama.py / Kaggle-Llama.py.
-     Notebook konsumen akan:
-       - download tarball itu
-       - cocokkan VERSION.txt di dalamnya (tag, arch, versi nvcc) dengan
-         environment yang sedang jalan
+     SATU URL ini berlaku buat T4, A100, L4, RTX 30xx/40xx, H100 sekaligus --
+     gak perlu ganti URL atau CUDA_ARCH lagi tiap pindah GPU. Notebook
+     konsumen akan:
+       - download tarball itu (sekali per session runtime, di-cache)
+       - auto-detect GPU yang lagi aktif via nvidia-smi (compute capability)
+       - cocokkan hasil deteksi itu dengan daftar cuda_archs di VERSION.txt
+         (native SASS match, ATAU >= arch PTX-forward-compat -> masih jalan
+         lewat JIT)
        - kalau cocok & lolos sanity check ('llama-server --version') -> pakai
-       - kalau tidak cocok/gagal -> otomatis fallback build dari source
+       - kalau GPU-nya lebih tua dari semua arch yang di-embed (mismatch),
+         atau tag/download gagal -> otomatis fallback build dari source,
+         khusus utk arch GPU yang terdeteksi saat itu saja (cepat, satu arch)
 
   VERSION.txt yang ikut terbundel:
 {version_txt}

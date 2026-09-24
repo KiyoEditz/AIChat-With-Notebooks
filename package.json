@@ -1,6 +1,6 @@
 {
   "name": "ai-chat-local",
-  "version": "1.6.7",
+  "version": "1.7.7",
   "description": "Local AI Character Chat - connects to Google Colab LLM Server",
   "main": "server.js",
   "scripts": {
