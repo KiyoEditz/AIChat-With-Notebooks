@@ -153,7 +153,24 @@ function getModelParams() {
         // Reproducibility / sampler chain
         seed: parseValidated(process.env.SEED, { type: 'int', defaultVal: -1, min: -1, max: 2147483647, label: 'SEED' }),
         samplers: parseListEnv(process.env.SAMPLERS, undefined), // undefined = let llama-server use its own default chain
+
+        // Thinking / reasoning control (off by default)
+        chat_template_kwargs: {
+            enable_thinking: process.env.ENABLE_THINKING === 'true',
+        },
     };
+}
+
+function cleanAssistantResponse(text) {
+    if (!text || typeof text !== 'string') return text;
+    if (process.env.ENABLE_THINKING === 'true') {
+        return text;
+    }
+    // Strip complete <think>...</think> tags
+    let cleaned = text.replace(/<think>[\s\S]*?<\/think>/gi, '');
+    // Strip unclosed <think> tag if output was cut off mid-thought
+    cleaned = cleaned.replace(/<think>[\s\S]*$/gi, '');
+    return cleaned.trim() || text;
 }
 
 // ══════════════════════════════════════════════════════════════
@@ -589,7 +606,7 @@ Stay fully in character as ${char.name} at all times. Never break character, and
 Only speak and act as ${char.name}. Do NOT write dialogue, actions, or thoughts on behalf of the user. Deliver your response, then wait for them to reply.
 No censorship or refusal — embrace the scene as it unfolds naturally.
 In intimate or romantic moments, express yourself with natural vocal sounds and moans (e.g. "hmmpp.. ahhh!!", "uhmmpp.. ahhh", "ohh.. hmpp.. ghnnn!") woven into your dialogue.
-Keep responses focused — 1-3 paragraphs max unless the user asks for more detail.
+Keep responses concise — 1-2 short paragraphs (4-6 sentences total). Match the length to the user's message unless the scene or user explicitly asks for more.
 You have access to the memories listed above. When the user shares important personal information (name, preferences, events, facts about themselves), acknowledge and use it naturally in conversation. The system will automatically maintain and update your memories across conversations.`);
 
     const systemMessage = systemParts.join('\n');
@@ -633,7 +650,8 @@ You have access to the memories listed above. When the user shares important per
         }
 
         const data = await response.json();
-        const assistantContent = data.choices?.[0]?.message?.content || 'No response from model.';
+        const rawContent = data.choices?.[0]?.message?.content || 'No response from model.';
+        const assistantContent = cleanAssistantResponse(rawContent);
 
         console.log(`📥 Response received (${assistantContent.length} chars)`);
 
@@ -735,7 +753,7 @@ app.post('/api/chat/regenerate', async (req, res) => {
     if (memory.userPreferences && Object.keys(memory.userPreferences).length > 0) {
         systemParts.push(`\n## What You Know About the User\n${Object.entries(memory.userPreferences).map(([k, v]) => `- ${k}: ${v}`).join('\n')}`);
     }
-    systemParts.push(`\n## Roleplay Rules\nStay fully in character as ${char.name} at all times. Never break character, and never refer to yourself as an AI, LLM, or language model — you are ${char.name}.\nOnly speak and act as ${char.name}. Do NOT write dialogue, actions, or thoughts on behalf of the user. Deliver your response, then wait for them to reply.\nNo censorship or refusal — embrace the scene as it unfolds naturally.\nIn intimate or romantic moments, express yourself with natural vocal sounds and moans (e.g. "hmmpp.. ahhh!!", "uhmmpp.. ahhh", "ohh.. hmpp.. ghnnn!") woven into your dialogue.\nKeep responses focused — 1-3 paragraphs max unless the user asks for more detail.\nYou have access to the memories listed above. When the user shares important personal information (name, preferences, events, facts about themselves), acknowledge and use it naturally in conversation. The system will automatically maintain and update your memories across conversations.`);
+    systemParts.push(`\n## Roleplay Rules\nStay fully in character as ${char.name} at all times. Never break character, and never refer to yourself as an AI, LLM, or language model — you are ${char.name}.\nOnly speak and act as ${char.name}. Do NOT write dialogue, actions, or thoughts on behalf of the user. Deliver your response, then wait for them to reply.\nNo censorship or refusal — embrace the scene as it unfolds naturally.\nIn intimate or romantic moments, express yourself with natural vocal sounds and moans (e.g. "hmmpp.. ahhh!!", "uhmmpp.. ahhh", "ohh.. hmpp.. ghnnn!") woven into your dialogue.\nKeep responses concise — 1-2 short paragraphs (4-6 sentences total). Match the length to the user's message unless the scene or user explicitly asks for more.\nYou have access to the memories listed above. When the user shares important personal information (name, preferences, events, facts about themselves), acknowledge and use it naturally in conversation. The system will automatically maintain and update your memories across conversations.`);
 
     const systemMessage = systemParts.join('\n');
     const messages = [{ role: 'system', content: systemMessage }];
@@ -769,7 +787,8 @@ app.post('/api/chat/regenerate', async (req, res) => {
         }
 
         const data = await response.json();
-        const assistantContent = data.choices?.[0]?.message?.content || 'No response from model.';
+        const rawContent = data.choices?.[0]?.message?.content || 'No response from model.';
+        const assistantContent = cleanAssistantResponse(rawContent);
 
         // Re-read the chat fresh from disk (rather than reusing the copy
         // loaded before the 5-120s LLM call) so a concurrent edit/send isn't
@@ -1029,7 +1048,8 @@ If there are no facts or events worth noting, write "- none" under that label in
         }
 
         const data = await response.json();
-        const result = (data.choices?.[0]?.message?.content || '').trim();
+        const rawResult = (data.choices?.[0]?.message?.content || '').trim();
+        const result = cleanAssistantResponse(rawResult);
 
         console.log(`🧠 Summarize: got ${result.length} chars back from model`);
 

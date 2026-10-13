@@ -46,7 +46,8 @@ import subprocess, time, os, re, sys, gc, atexit, signal, shutil, glob, tarfile,
 
 # A model that needs BOTH T4s to fit comfortably (32B-class at Q6_K lands
 # well above a single T4's ~15GB usable VRAM).
-MODEL_REPO = "mradermacher/EVA-Qwen2.5-32B-v0.2-i1-GGUF:Q6_K"   # ~27 GB
+MODEL_REPO = "mradermacher/Gemma-4-Dark-Gemistry-31B-i1-GGUF:Q6_K" # ~27 GB
+# MODEL_REPO = "mradermacher/EVA-Qwen2.5-32B-v0.2-i1-GGUF:Q6_K"   # ~27 GB
 
 # Alternatives (uncomment one to switch):
 # MODEL_REPO = "bartowski/EVA-Qwen2.5-32B-v0.2-GGUF:Q4_K_M"        # ~20GB, smaller/faster
@@ -95,6 +96,9 @@ REPEAT_LAST_N, REPEAT_PENALTY = 256, 1.05
 PRESENCE_PENALTY, FREQUENCY_PENALTY = 0.0, 0.0
 DRY_MULTIPLIER, DRY_BASE = 0.8, 1.75
 DRY_ALLOWED_LENGTH, DRY_PENALTY_LAST_N = 2, 1024
+
+# Thinking / reasoning mode (False = always off, True = on)
+ENABLE_THINKING = False
 
 MIN_FREE_DISK_MARGIN_GB = 5   # bigger margin than Colab -- larger model
 
@@ -661,7 +665,11 @@ def wait_for_ready(proc, log_path, base_url, api_key, timeout=3000):
         r = requests.post(
             f"{base_url}/v1/chat/completions",
             headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
-            json={"messages": [{"role": "user", "content": "Hi"}], "max_tokens": 1},
+            json={
+                "messages": [{"role": "user", "content": "Hi"}],
+                "max_tokens": 1,
+                "chat_template_kwargs": {"enable_thinking": False}
+            },
             timeout=60,
         )
         r.raise_for_status()
@@ -722,6 +730,11 @@ try:
     LLAMA_PORT = acquire_free_port(LLAMA_PORT)
     llama_log = "/tmp/llama_server.log"
     llama_env = {"CUDA_VISIBLE_DEVICES": GPU_IDS}
+    reasoning_flags = (
+        "--reasoning off --chat-template-kwargs '{\"enable_thinking\": false}'"
+        if not ENABLE_THINKING else
+        "--reasoning on"
+    )
     llama_cmd = (
         f"{server_cmd} "
         f"-m {model_path} "
@@ -733,7 +746,8 @@ try:
         f"--presence-penalty {PRESENCE_PENALTY} --frequency-penalty {FREQUENCY_PENALTY} "
         f"--dry-multiplier {DRY_MULTIPLIER} --dry-base {DRY_BASE} "
         f"--dry-allowed-length {DRY_ALLOWED_LENGTH} --dry-penalty-last-n {DRY_PENALTY_LAST_N} "
-        f"--jinja"
+        f"--jinja "
+        f"{reasoning_flags}"
     )
     _procs["llama"] = bg(llama_cmd, llama_log, env=llama_env)
     wait_for_ready(_procs["llama"], llama_log, f"http://localhost:{LLAMA_PORT}", API_KEY, timeout=3000)
@@ -784,6 +798,7 @@ try:
   GPUs         : {GPU_IDS} (dual T4)
   Context      : {NUM_CTX}
   Sampler      : repeat_penalty={REPEAT_PENALTY} (last {REPEAT_LAST_N}) | dry_multiplier={DRY_MULTIPLIER}
+  Thinking     : {'OFF' if not ENABLE_THINKING else 'ON'}
   Disk free    : {disk_free_gb:.1f} GB
   Cloudflare   : {tunnel_url}
   API Key      : {API_KEY}
