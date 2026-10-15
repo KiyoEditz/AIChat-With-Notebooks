@@ -118,6 +118,24 @@ Cloudflare Tunnel is used identically in both stacks — it just tunnels a local
 4. **Accessing the Application (Local):** Open your preferred web browser and navigate to `http://localhost:3000`.
 5. **Accessing the Application (Same WiFi Network):** This application can be accessed by any device (such as a smartphone or tablet) connected to the same WiFi network as the host computer. Simply enter the local IP address of the host computer followed by the server port into the device's browser (e.g., `http://192.168.1.15:3000`).
 
+## DUKUNGAN & DONASI - SUPPORT & DONATION
+
+Jika Anda menyukai proyek ini dan ingin mendukung pengembangannya, Anda dapat memberikan apresiasi melalui platform donasi berikut:
+
+- ☕ **Ko-fi:** [ko-fi.com/kiyoeditz](https://ko-fi.com/kiyoeditz)
+- 💛 **Saweria:** [saweria.co/KiyoEditz](https://saweria.co/KiyoEditz)
+- 💖 **GitHub Sponsors:** *(Masih dalam peninjauan / Under review)*
+
+Dukungan Anda sangat berarti untuk membantu pemeliharaan dan penambahan fitur-fitur baru ke depannya! Terima kasih banyak!
+--------
+If you enjoy this project and want to support its ongoing development, feel free to show some love through the following donation channels:
+
+- ☕ **Ko-fi:** [ko-fi.com/kiyoeditz](https://ko-fi.com/kiyoeditz)
+- 💛 **Saweria:** [saweria.co/KiyoEditz](https://saweria.co/KiyoEditz)
+- 💖 **GitHub Sponsors:** *(Currently under review)*
+
+Your support means a lot and helps sustain maintenance and future feature improvements! Thank you so much!
+
 ## CHANGELOG
 
 See [CHANGELOG.md](CHANGELOG.md) for a detailed history of changes.

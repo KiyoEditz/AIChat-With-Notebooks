@@ -3,6 +3,74 @@
 All notable changes to this project are documented here. Format loosely
 follows [Keep a Changelog](https://keepachangelog.com/).
 
+## [v1.5.0] — Centralized Persona System & Structured User Attributes
+
+Refactors the persona architecture from duplicating `userPreferences` inside every character's memory file into a centralized, reusable persona pool in `data/persona/`, with a dedicated Settings management panel and compact chat memory selector.
+
+### Added
+- **Centralized Persona Storage (`data/persona/`)**:
+  - Persona profiles are now stored independently (e.g. `1.json`) and shared globally across all characters.
+  - Characters only store a concise `personaId` reference in their memory file, eliminating duplicated persona data across memory files.
+- **Dedicated Persona Management Panel (`settings.html`)**:
+  - Added new **👤 Persona** tab positioned directly below **Configuration** and above **Appearance**.
+  - Provides intuitive persona cards with index badges (e.g. `Persona #1`, `Persona #2`).
+  - Supports adding, editing, and deleting multiple personas.
+  - Strict input validation:
+    - **Name**: String (supports letters and numbers).
+    - **Age (Umur)**: Strictly number-only.
+    - **Height (Tinggi Badan)**: Strictly number-only in cm.
+    - **Weight (Berat Badan)**: Strictly number-only in kg.
+    - **Gender (Jenis Kelamin)**: Dropdown selection (`Male`, `Female`, `Non-binary`).
+    - **Extra Attributes**: Attribute selector list (Pekerjaan, Hobi, Status, Kepribadian, or custom key-value).
+- **Compact Persona Selector in Chat (`index.html`)**:
+  - Replaced the bulky key-value memory editor in the chat memory modal with a compact 1-click persona selector.
+  - Displays selected persona chips with index and name, plus an active summary badge and direct link to Settings.
+- **Dedicated Donation Page (`donate.html` & `donate.css`)**:
+  - Standalone donation page supporting Saweria (QRIS, e-wallet, bank transfer) and Ko-fi (PayPal, Card), with GitHub Sponsors noted as under review.
+  - Interactive quick-copy link buttons with clipboard feedback toast notifications.
+  - Added direct donation button beside the Settings button on the welcome screen (`index.html`) and in the sidebar header.
+- **REST Endpoints for Persona in `server.js`**:
+  - `GET /api/personas`, `GET /api/personas/:id`, `POST /api/personas`, `PUT /api/personas/:id`, `DELETE /api/personas/:id`.
+
+### Changed
+- **Memory Cleaner & Heuristic Regex Removal (`server.js`)**:
+  - Migrated 135 memory files to reference central `personaId` instead of bulky redundant `userPreferences` blocks.
+  - Removed imprecise regex heuristic auto-filling of name and age from `autoExtractMemory()`, ensuring persona attributes remain exact and user-controlled.
+  - Chat completions (`/api/chat/send` and `/api/chat/regenerate`) now resolve and format active persona details cleanly into `## What You Know About the User`.
+
+---
+
+## [v1.4.1] — Thinking Mode Off by Default & Response Length Tuning
+
+Disables chain-of-thought / reasoning tokens (`<think>...</think>`) by default
+across all notebook servers and client requests, and refines the character roleplay
+system prompt to enforce concise 4–6 sentence responses.
+
+### Added
+- **Native thinking / reasoning toggle (`ENABLE_THINKING = False`)**:
+  - Configurable in `Collab-Llama.py`, `Collab-Llama-Private.py`, `Kaggle-Llama.py`,
+    and `Kaggle-Llama-Private.py`.
+  - Added `--reasoning off --chat-template-kwargs '{"enable_thinking": false}'`
+    to `llama-server` CLI startup flags when disabled, turning off reasoning at
+    both the llama.cpp engine and Jinja chat template levels.
+  - Added `chat_template_kwargs: {"enable_thinking": False}` to the startup
+    1-token completion test in all notebook scripts.
+  - Added `Thinking : OFF` indicator in the server ready banner.
+- **Environment configuration (`ENABLE_THINKING`)** in `.env` and `.env.example`:
+  - Set to `false` by default to disable thinking tokens on reasoning-capable
+    models (e.g. Qwen 2.5/3, DeepSeek-R1).
+- **Client-side request kwargs and fallback filter** in `server.js`:
+  - Automatically sends `chat_template_kwargs: { enable_thinking: false }` via
+    `getModelParams()` on every `/api/chat` and `/api/chat/regenerate` request.
+  - Added `cleanAssistantResponse()` helper to strip any completed or unclosed
+    `<think>...</think>` tags if a reasoning model leaks thought tokens into the output text.
+
+### Changed
+- **Response length accuracy in roleplay rules** (`server.js`):
+  - Refined system prompt in `/api/chat` and `/api/chat/regenerate` from
+    `1-2 short paragraphs` to `1-2 short paragraphs (4-6 sentences total)` to provide
+    a concrete, measurable sentence-count target for more consistent response lengths.
+
 ---
 
 ## [v1.3.1] — Multi-GPU auto-detect build (T4 / A100 / L4 / RTX / H100)

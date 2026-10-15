@@ -1,0 +1,177 @@
+<!DOCTYPE html>
+<html lang="id" class="donate-page">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Dukung Pengembang (Donasi) — AI Character Chat</title>
+    <meta name="description" content="Dukung pengembangan AI Character Chat melalui Saweria atau Ko-fi">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link
+        href="https://fonts.googleapis.com/css2?family=Newsreader:ital,opsz,wght@0,6..72,400;0,6..72,500;0,6..72,600;1,6..72,400&family=Inter:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap"
+        rel="stylesheet">
+    <link rel="stylesheet" href="/styles.css">
+    <!-- Blocking: applies saved theme palette before page paints -->
+    <script src="/theme.js"></script>
+    <link rel="stylesheet" href="/donate.css">
+</head>
+
+<body class="donate-page">
+    <div id="donate-scroll-root">
+        <div class="donate-shell">
+            <header class="donate-topbar">
+                <a class="donate-back" href="/index.html" aria-label="Kembali ke chat" title="Kembali ke chat">
+                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <line x1="19" y1="12" x2="5" y2="12" />
+                        <polyline points="12 19 5 12 12 5" />
+                    </svg>
+                </a>
+                <div class="donate-title">❤️ Dukungan &amp; Donasi</div>
+            </header>
+
+            <!-- Hero Section -->
+            <section class="donate-hero" aria-labelledby="hero-title">
+                <div class="donate-hero-badge">✨ Support the Creator</div>
+                <h1 id="hero-title" class="donate-hero-title">Dukung Pengembangan AI Chat</h1>
+                <p class="donate-hero-desc">
+                    Aplikasi ini dibuat dan dikembangkan secara independen serta dapat digunakan secara gratis. Dukunganmu sangat berarti untuk membantu kelangsungan server, riset notebook Google Colab &amp; Kaggle, serta pengembangan fitur-fitur baru selanjutnya!
+                </p>
+            </section>
+
+            <!-- Donation Options Grid -->
+            <section class="donate-grid" aria-label="Platform Donasi">
+
+                <!-- Card 1: Saweria (Indonesia) -->
+                <div class="donate-card saweria-card" id="card-saweria">
+                    <div class="donate-card-badge">🇮🇩 Lokal (Indonesia)</div>
+                    <div class="donate-card-icon-wrap saweria-icon-wrap">
+                        <svg class="donate-card-svg" width="30" height="30" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <rect x="2" y="4" width="20" height="16" rx="2" />
+                            <line x1="2" y1="10" x2="22" y2="10" />
+                        </svg>
+                    </div>
+                    <h2 class="donate-card-name">Saweria</h2>
+                    <div class="donate-card-handle">@KiyoEditz</div>
+                    <p class="donate-card-desc">
+                        Dukungan pembayaran lokal Indonesia via <strong>QRIS</strong>, <strong>GoPay</strong>, <strong>OVO</strong>, <strong>Dana</strong>, <strong>LinkAja</strong>, <strong>ShopeePay</strong>, dan transfer bank.
+                    </p>
+                    <div class="donate-card-actions">
+                        <a href="https://saweria.co/KiyoEditz" target="_blank" rel="noopener noreferrer" class="btn-donate saweria-btn" id="link-saweria">
+                            <span>Buka Saweria</span>
+                            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+                                <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"></path>
+                                <polyline points="15 3 21 3 21 9"></polyline>
+                                <line x1="10" y1="14" x2="21" y2="3"></line>
+                            </svg>
+                        </a>
+                        <button type="button" class="btn-copy-link" data-url="https://saweria.co/KiyoEditz" id="btn-copy-saweria" title="Salin link Saweria">
+                            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                <rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect>
+                                <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path>
+                            </svg>
+                            <span>Salin Link</span>
+                        </button>
+                    </div>
+                </div>
+
+                <!-- Card 2: Ko-fi (Global) -->
+                <div class="donate-card kofi-card" id="card-kofi">
+                    <div class="donate-card-badge">🌍 Internasional / Global</div>
+                    <div class="donate-card-icon-wrap kofi-icon-wrap">
+                        <svg class="donate-card-svg" width="30" height="30" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <path d="M18 8h1a4 4 0 0 1 0 8h-1"></path>
+                            <path d="M2 8h16v9a4 4 0 0 1-4 4H6a4 4 0 0 1-4-4V8z"></path>
+                            <line x1="6" y1="1" x2="6" y2="4"></line>
+                            <line x1="10" y1="1" x2="10" y2="4"></line>
+                            <line x1="14" y1="1" x2="14" y2="4"></line>
+                        </svg>
+                    </div>
+                    <h2 class="donate-card-name">Ko-fi</h2>
+                    <div class="donate-card-handle">@kiyoeditz</div>
+                    <p class="donate-card-desc">
+                        Support the project globally via <strong>PayPal</strong>, <strong>Credit Card</strong>, or <strong>Debit Card</strong>. You can buy a coffee or tip any custom amount!
+                    </p>
+                    <div class="donate-card-actions">
+                        <a href="https://ko-fi.com/kiyoeditz" target="_blank" rel="noopener noreferrer" class="btn-donate kofi-btn" id="link-kofi">
+                            <span>Buka Ko-fi</span>
+                            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+                                <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"></path>
+                                <polyline points="15 3 21 3 21 9"></polyline>
+                                <line x1="10" y1="14" x2="21" y2="3"></line>
+                            </svg>
+                        </a>
+                        <button type="button" class="btn-copy-link" data-url="https://ko-fi.com/kiyoeditz" id="btn-copy-kofi" title="Salin link Ko-fi">
+                            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                <rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect>
+                                <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path>
+                            </svg>
+                            <span>Salin Link</span>
+                        </button>
+                    </div>
+                </div>
+
+                <!-- Card 3: GitHub Sponsors (Under Review) -->
+                <div class="donate-card github-card muted-card" id="card-github">
+                    <div class="donate-card-badge status-review">⏳ Sedang Ditinjau (Under Review)</div>
+                    <div class="donate-card-icon-wrap github-icon-wrap">
+                        <svg class="donate-card-svg" width="30" height="30" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <path d="M9 19c-5 1.5-5-2.5-7-3m14 6v-3.87a3.37 3.37 0 0 0-.94-2.61c3.14-.35 6.44-1.54 6.44-7A5.44 5.44 0 0 0 20 4.77 5.07 5.07 0 0 0 19.91 1S18.73.65 16 2.48a13.38 13.38 0 0 0-7 0C6.27.65 5.09 1 5.09 1A5.07 5.07 0 0 0 5 4.77a5.44 5.44 0 0 0-1.5 3.78c0 5.42 3.3 6.61 6.44 7A3.37 3.37 0 0 0 9 18.13V22"></path>
+                        </svg>
+                    </div>
+                    <h2 class="donate-card-name">GitHub Sponsors</h2>
+                    <div class="donate-card-handle">KiyoEditz</div>
+                    <p class="donate-card-desc">
+                        Program sponsor resmi dari GitHub. Saat ini akun sponsor masih dalam tahap peninjauan (review) dan akan segera tersedia.
+                    </p>
+                    <div class="donate-card-actions">
+                        <button type="button" class="btn-donate disabled-btn" disabled id="btn-github-sponsor">
+                            <span>Segera Hadir</span>
+                        </button>
+                    </div>
+                </div>
+
+            </section>
+
+            <!-- FAQ & Notes -->
+            <section class="donate-info-card">
+                <h3>💡 Informasi &amp; FAQ</h3>
+                <ul>
+                    <li><strong>Apakah donasi wajib?</strong> Tidak. Aplikasi AI Character Chat 100% gratis dan open-source (CC BY-NC 4.0).</li>
+                    <li><strong>Untuk apa donasi digunakan?</strong> Donasi digunakan untuk mendukung riset notebook LLM, pengujian komputasi GPU, pemeliharaan repository, dan penambahan fitur baru.</li>
+                    <li><strong>Ada kendala atau masukan?</strong> Silakan hubungi atau buat issue di repository GitHub proyek ini.</li>
+                </ul>
+            </section>
+
+            <!-- Bottom Navigation -->
+            <div class="donate-bottom-actions">
+                <a href="/index.html" class="btn-primary" id="btn-back-home">
+                    ← Kembali ke Aplikasi Chat
+                </a>
+            </div>
+        </div>
+    </div>
+
+    <!-- Toast Notification -->
+    <div id="donate-toast" class="donate-toast" role="status" aria-live="polite">Link berhasil disalin! 📋</div>
+
+    <script>
+        document.querySelectorAll('.btn-copy-link').forEach(btn => {
+            btn.addEventListener('click', async () => {
+                const url = btn.dataset.url;
+                if (!url) return;
+                try {
+                    await navigator.clipboard.writeText(url);
+                    const toast = document.getElementById('donate-toast');
+                    toast.classList.add('show');
+                    clearTimeout(toast._timer);
+                    toast._timer = setTimeout(() => toast.classList.remove('show'), 2000);
+                } catch (e) {
+                    prompt('Salin tautan ini:', url);
+                }
+            });
+        });
+    </script>
+</body>
+
+</html>

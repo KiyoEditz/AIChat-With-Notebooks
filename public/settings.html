@@ -19,134 +19,225 @@
 
 <body class="settings-page">
     <div id="settings-scroll-root">
-    <div class="settings-shell">
-        <div class="settings-topbar">
-            <a class="settings-back" href="/index.html" aria-label="Back to chat" title="Back to chat">
-                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                    <line x1="19" y1="12" x2="5" y2="12" />
-                    <polyline points="12 19 5 12 12 5" />
-                </svg>
-            </a>
-            <div class="settings-title">⚙️ Settings</div>
-        </div>
+        <div class="settings-shell">
+            <div class="settings-topbar">
+                <a class="settings-back" href="/index.html" aria-label="Back to chat" title="Back to chat">
+                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <line x1="19" y1="12" x2="5" y2="12" />
+                        <polyline points="12 19 5 12 12 5" />
+                    </svg>
+                </a>
+                <div class="settings-title">⚙️ Settings</div>
+            </div>
 
-        <div class="settings-layout">
-            <nav class="settings-nav" aria-label="Settings sections">
-                <button class="settings-nav-item active" type="button" data-tab="configuration">🌐 Configuration</button>
-                <button class="settings-nav-item" type="button" data-tab="appearance">🎨 Appearance</button>
-                <button class="settings-nav-item" type="button" data-tab="notifications">🔔 Notifications</button>
-                <button class="settings-nav-item" type="button" data-tab="data-backup">💾 Data &amp; backup</button>
-            </nav>
+            <div class="settings-layout">
+                <nav class="settings-nav" aria-label="Settings sections">
+                    <button class="settings-nav-item active" type="button" data-tab="configuration">🌐
+                        Configuration</button>
+                    <button class="settings-nav-item" type="button" data-tab="persona">👤 Persona</button>
+                    <button class="settings-nav-item" type="button" data-tab="appearance">🎨 Appearance</button>
+                    <button class="settings-nav-item" type="button" data-tab="notifications">🔔 Notifications</button>
+                    <button class="settings-nav-item" type="button" data-tab="data-backup">💾 Data &amp; backup</button>
+                </nav>
 
-            <!-- ═══ Configuration ═══ -->
-            <section class="settings-panel" id="tab-configuration">
-                <h2>Connection</h2>
-                <p class="settings-desc">
-                    Point the app at your running Colab/Kaggle LLM server.
-                </p>
+                <!-- ═══ Configuration ═══ -->
+                <section class="settings-panel" id="tab-configuration">
+                    <h2>Connection</h2>
+                    <p class="settings-desc">
+                        Point the app at your running Colab/Kaggle LLM server.
+                    </p>
 
-                <div class="form-group">
-                    <label for="cfg-base-url">🌐 Colab Base URL</label>
-                    <input type="url" id="cfg-base-url" placeholder="https://xxxx.trycloudflare.com" class="form-input">
-                    <span class="form-hint">URL Cloudflare dari output Google Colab notebook</span>
-                </div>
-                <div class="form-group">
-                    <label for="cfg-api-key">🔑 API Key</label>
-                    <input type="text" id="cfg-api-key" placeholder="sk-colab-local" class="form-input">
-                </div>
-                <div class="form-group">
-                    <label for="cfg-model">🤖 Model Name</label>
-                    <select id="cfg-model" class="form-input">
-                        <option value="character1">character1 (default)</option>
-                        <option value="hf.co/mradermacher/Hermes-4-14B-BF16-abliterated-i1-GGUF:IQ4_XS">
-                            Hermes-4-14B-BF16-abliterated</option>
-                    </select>
-                    <span class="form-hint">Nama model sesuai mapping di LiteLLM (semua akan diarahkan ke model
-                        Ollama di Colab)</span>
-                </div>
-                <div class="form-actions">
-                    <button class="btn-secondary" id="btn-settings-test-connection">🔌 Test Connection</button>
-                    <button class="btn-primary" id="btn-settings-save">💾 Simpan</button>
-                </div>
-                <div id="settings-connection-result" class="connection-result" style="display:none"></div>
-            </section>
+                    <div class="form-group">
+                        <label for="cfg-base-url">🌐 Colab Base URL</label>
+                        <input type="url" id="cfg-base-url" placeholder="https://xxxx.trycloudflare.com"
+                            class="form-input">
+                        <span class="form-hint">URL Cloudflare dari output Google Colab notebook</span>
+                    </div>
+                    <div class="form-group">
+                        <label for="cfg-api-key">🔑 API Key</label>
+                        <input type="text" id="cfg-api-key" placeholder="sk-colab-local" class="form-input">
+                    </div>
+                    <div class="form-group">
+                        <label for="cfg-model">🤖 Model Name</label>
+                        <select id="cfg-model" class="form-input">
+                            <option value="character1">character1 (default)</option>
+                        </select>
+                        <span class="form-hint">Nama model sesuai mapping di LiteLLM (semua akan diarahkan ke model
+                            Ollama di Colab)</span>
+                    </div>
+                    <div class="form-actions">
+                        <button class="btn-secondary" id="btn-settings-test-connection">🔌 Test Connection</button>
+                        <button class="btn-primary" id="btn-settings-save">💾 Simpan</button>
+                    </div>
+                    <div id="settings-connection-result" class="connection-result" style="display:none"></div>
+                </section>
 
-            <!-- ═══ Appearance ═══ -->
-            <section class="settings-panel" id="tab-appearance" hidden>
-                <h2>Color palette</h2>
-                <p class="settings-desc">
-                    Pick a primary (accent) color and a background color — every panel, bubble,
-                    and button in the app updates instantly and is remembered on this browser.
-                </p>
-
-                <div class="picker-row">
-                    <div class="picker-card">
-                        <input type="color" id="accent-picker" aria-label="Primary accent color">
+                <!-- ═══ Persona ═══ -->
+                <section class="settings-panel" id="tab-persona" hidden>
+                    <div class="persona-panel-header">
                         <div>
-                            <label for="accent-picker">Primary / accent</label>
-                            <div class="picker-value" id="accent-value">#A855F7</div>
+                            <h2>User Persona</h2>
+                            <p class="settings-desc">
+                                Kelola profil persona kamu. Persona ini digunakan sebagai identitas kamu saat mengobrol dengan karakter AI.
+                            </p>
+                        </div>
+                        <button class="btn-secondary" id="btn-create-persona" type="button">+ Tambah Persona</button>
+                    </div>
+
+                    <div class="persona-selector-cards" id="persona-list-cards">
+                        <!-- Rendered by JS -->
+                    </div>
+
+                    <div class="persona-editor-card" id="persona-editor-card">
+                        <div class="persona-editor-header">
+                            <span class="persona-badge" id="persona-badge-index">Persona #1</span>
+                            <div style="flex:1"></div>
+                            <button class="btn-danger-outline" id="btn-delete-persona" type="button" style="display:none">🗑️ Hapus</button>
+                        </div>
+
+                        <div class="form-group">
+                            <label for="persona-name">📛 Nama (Name)</label>
+                            <input type="text" id="persona-name" placeholder="Nama atau panggilan..." class="form-input">
+                            <span class="form-hint">Dapat berupa huruf atau angka</span>
+                        </div>
+
+                        <div class="form-row-2">
+                            <div class="form-group">
+                                <label for="persona-age">🎂 Umur (Age)</label>
+                                <input type="number" id="persona-age" min="1" max="150" step="1" placeholder="20" class="form-input">
+                                <span class="form-hint">Hanya menerima angka</span>
+                            </div>
+                            <div class="form-group">
+                                <label for="persona-gender">⚧️ Jenis Kelamin (Gender)</label>
+                                <select id="persona-gender" class="form-input">
+                                    <option value="Male">Male</option>
+                                    <option value="Female">Female</option>
+                                    <option value="Non-binary">Non-binary</option>
+                                </select>
+                                <span class="form-hint">Pilih dari list</span>
+                            </div>
+                        </div>
+
+                        <div class="form-row-2">
+                            <div class="form-group">
+                                <label for="persona-height">📏 Tinggi Badan (cm)</label>
+                                <input type="number" id="persona-height" min="30" max="300" step="1" placeholder="180" class="form-input">
+                                <span class="form-hint">Hanya menerima angka (cm)</span>
+                            </div>
+                            <div class="form-group">
+                                <label for="persona-weight">⚖️ Berat Badan (kg)</label>
+                                <input type="number" id="persona-weight" min="10" max="500" step="1" placeholder="60" class="form-input">
+                                <span class="form-hint">Hanya menerima angka (kg)</span>
+                            </div>
+                        </div>
+
+                        <div class="persona-extra-section">
+                            <label class="form-sublabel">➕ Atribut Tambahan (Opsional)</label>
+                            <div id="persona-extra-items" class="persona-extra-items"></div>
+                            <div class="persona-extra-add-row">
+                                <select id="persona-extra-key-select" class="form-input" style="width:160px">
+                                    <option value="Pekerjaan">Pekerjaan</option>
+                                    <option value="Hobi">Hobi</option>
+                                    <option value="Status">Status</option>
+                                    <option value="Kepribadian">Kepribadian</option>
+                                    <option value="custom">Lainnya...</option>
+                                </select>
+                                <input type="text" id="persona-extra-custom-key" placeholder="Key kustom..." class="form-input" style="width:130px; display:none">
+                                <input type="text" id="persona-extra-val" placeholder="Nilai atribut..." class="form-input">
+                                <button class="btn-secondary" id="btn-add-extra-attr" type="button">+ Tambah</button>
+                            </div>
+                        </div>
+
+                        <div class="settings-actions">
+                            <button class="btn-primary" id="btn-save-persona" type="button">💾 Simpan Persona</button>
+                            <span class="save-indicator" id="persona-save-indicator"><span class="dot"></span> Tersimpan</span>
                         </div>
                     </div>
-                    <div class="picker-card">
-                        <input type="color" id="bg-picker" aria-label="Background color">
-                        <div>
-                            <label for="bg-picker">Background</label>
-                            <div class="picker-value" id="bg-value">#121212</div>
+                </section>
+
+                <!-- ═══ Appearance ═══ -->
+                <section class="settings-panel" id="tab-appearance" hidden>
+                    <h2>Color palette</h2>
+                    <p class="settings-desc">
+                        Pick a primary (accent) color and a background color — every panel, bubble,
+                        and button in the app updates instantly and is remembered on this browser.
+                    </p>
+
+                    <div class="picker-row">
+                        <div class="picker-card">
+                            <input type="color" id="accent-picker" aria-label="Primary accent color">
+                            <div>
+                                <label for="accent-picker">Primary / accent</label>
+                                <div class="picker-value" id="accent-value">#A855F7</div>
+                            </div>
+                        </div>
+                        <div class="picker-card">
+                            <input type="color" id="bg-picker" aria-label="Background color">
+                            <div>
+                                <label for="bg-picker">Background</label>
+                                <div class="picker-value" id="bg-value">#121212</div>
+                            </div>
                         </div>
                     </div>
-                </div>
 
-                <div class="presets-row">
-                    <span class="presets-label">Quick presets:</span>
-                    <button class="preset-swatch" style="background:linear-gradient(135deg,#A855F7,#121212)" data-accent="#A855F7" data-bg="#121212" aria-label="Default violet"></button>
-                    <button class="preset-swatch" style="background:linear-gradient(135deg,#22C55E,#0B1712)" data-accent="#22C55E" data-bg="#0B1712" aria-label="Emerald"></button>
-                    <button class="preset-swatch" style="background:linear-gradient(135deg,#F97316,#1A1210)" data-accent="#F97316" data-bg="#1A1210" aria-label="Amber"></button>
-                    <button class="preset-swatch" style="background:linear-gradient(135deg,#0EA5E9,#0B1420)" data-accent="#0EA5E9" data-bg="#0B1420" aria-label="Sky"></button>
-                    <button class="preset-swatch" style="background:linear-gradient(135deg,#EC4899,#160B12)" data-accent="#EC4899" data-bg="#160B12" aria-label="Pink"></button>
-                    <button class="preset-swatch" style="background:linear-gradient(135deg,#6366F1,#F5F5F7)" data-accent="#6366F1" data-bg="#F5F5F7" aria-label="Light mode"></button>
-                </div>
-
-                <div class="settings-actions">
-                    <button class="btn-primary" id="btn-apply-theme">Apply &amp; save</button>
-                    <button class="btn-secondary" id="btn-reset-theme">Reset to default</button>
-                    <span class="save-indicator" id="save-indicator"><span class="dot"></span> Saved to this browser</span>
-                </div>
-
-                <div class="preview-label">Live preview</div>
-                <div class="preview-box">
-                    <div class="preview-messages">
-                        <div class="preview-bubble assistant">Hey! This is how assistant replies will look.</div>
-                        <div class="preview-bubble user">And this is your message bubble ✨</div>
+                    <div class="presets-row">
+                        <span class="presets-label">Quick presets:</span>
+                        <button class="preset-swatch" style="background:linear-gradient(135deg,#A855F7,#121212)"
+                            data-accent="#A855F7" data-bg="#121212" aria-label="Default violet"></button>
+                        <button class="preset-swatch" style="background:linear-gradient(135deg,#22C55E,#0B1712)"
+                            data-accent="#22C55E" data-bg="#0B1712" aria-label="Emerald"></button>
+                        <button class="preset-swatch" style="background:linear-gradient(135deg,#F97316,#1A1210)"
+                            data-accent="#F97316" data-bg="#1A1210" aria-label="Amber"></button>
+                        <button class="preset-swatch" style="background:linear-gradient(135deg,#0EA5E9,#0B1420)"
+                            data-accent="#0EA5E9" data-bg="#0B1420" aria-label="Sky"></button>
+                        <button class="preset-swatch" style="background:linear-gradient(135deg,#EC4899,#160B12)"
+                            data-accent="#EC4899" data-bg="#160B12" aria-label="Pink"></button>
+                        <button class="preset-swatch" style="background:linear-gradient(135deg,#6366F1,#F5F5F7)"
+                            data-accent="#6366F1" data-bg="#F5F5F7" aria-label="Light mode"></button>
                     </div>
-                    <div class="preview-controls">
-                        <button class="btn-primary" type="button">Send</button>
-                        <button class="btn-secondary" type="button">Regenerate</button>
-                        <span class="preview-chip">● Online</span>
+
+                    <div class="settings-actions">
+                        <button class="btn-primary" id="btn-apply-theme">Apply &amp; save</button>
+                        <button class="btn-secondary" id="btn-reset-theme">Reset to default</button>
+                        <span class="save-indicator" id="save-indicator"><span class="dot"></span> Saved to this
+                            browser</span>
                     </div>
-                </div>
-            </section>
 
-            <!-- ═══ Notifications (stub) ═══ -->
-            <section class="settings-panel" id="tab-notifications" hidden>
-                <h2>Notifications</h2>
-                <p class="settings-desc">Changelog &amp; update notifications.</p>
-                <div class="settings-stub">
-                    <span class="stub-icon">🔔</span>
-                    Coming soon — this will show changelog/update notifications.
-                </div>
-            </section>
+                    <div class="preview-label">Live preview</div>
+                    <div class="preview-box">
+                        <div class="preview-messages">
+                            <div class="preview-bubble assistant">Hey! This is how assistant replies will look.</div>
+                            <div class="preview-bubble user">And this is your message bubble ✨</div>
+                        </div>
+                        <div class="preview-controls">
+                            <button class="btn-primary" type="button">Send</button>
+                            <button class="btn-secondary" type="button">Regenerate</button>
+                            <span class="preview-chip">● Online</span>
+                        </div>
+                    </div>
+                </section>
 
-            <!-- ═══ Data & backup (stub) ═══ -->
-            <section class="settings-panel" id="tab-data-backup" hidden>
-                <h2>Data &amp; backup</h2>
-                <p class="settings-desc">Export, import and back up your characters, chats and memory.</p>
-                <div class="settings-stub">
-                    <span class="stub-icon">💾</span>
-                    Coming soon — a backup system is still being designed.
-                </div>
-            </section>
+                <!-- ═══ Notifications (stub) ═══ -->
+                <section class="settings-panel" id="tab-notifications" hidden>
+                    <h2>Notifications</h2>
+                    <p class="settings-desc">Changelog &amp; update notifications.</p>
+                    <div class="settings-stub">
+                        <span class="stub-icon">🔔</span>
+                        Coming soon — this will show changelog/update notifications.
+                    </div>
+                </section>
+
+                <!-- ═══ Data & backup (stub) ═══ -->
+                <section class="settings-panel" id="tab-data-backup" hidden>
+                    <h2>Data &amp; backup</h2>
+                    <p class="settings-desc">Export, import and back up your characters, chats and memory.</p>
+                    <div class="settings-stub">
+                        <span class="stub-icon">💾</span>
+                        Coming soon — a backup system is still being designed.
+                    </div>
+                </section>
+            </div>
         </div>
-    </div>
     </div>
 
     <script src="/settings.js"></script>

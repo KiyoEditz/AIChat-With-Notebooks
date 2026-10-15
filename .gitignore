@@ -3,6 +3,7 @@ node_modules/
 __pycache__
 data/chats/*
 data/memory/*
+data/persona/*
 package-lock.json
 karakter.json
 data/characters/562d4ca2-023f-46ee-ace6-acb4f47f11b0.json

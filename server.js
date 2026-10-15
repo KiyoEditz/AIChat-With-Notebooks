@@ -21,8 +21,9 @@ const DATA_DIR = path.join(__dirname, 'data');
 const CHARACTERS_DIR = path.join(DATA_DIR, 'characters');
 const CHATS_DIR = path.join(DATA_DIR, 'chats');
 const MEMORY_DIR = path.join(DATA_DIR, 'memory');
+const PERSONA_DIR = path.join(DATA_DIR, 'persona');
 
-[DATA_DIR, CHARACTERS_DIR, CHATS_DIR, MEMORY_DIR].forEach(dir => {
+[DATA_DIR, CHARACTERS_DIR, CHATS_DIR, MEMORY_DIR, PERSONA_DIR].forEach(dir => {
     if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
 });
 
@@ -404,6 +405,227 @@ app.delete('/api/chat/:chatId', (req, res) => {
 });
 
 // ══════════════════════════════════════════════════════════════
+//  PERSONA API — Central persona profiles for users
+// ══════════════════════════════════════════════════════════════
+
+function getPersonas() {
+    if (!fs.existsSync(PERSONA_DIR)) fs.mkdirSync(PERSONA_DIR, { recursive: true });
+    const files = fs.readdirSync(PERSONA_DIR).filter(f => f.endsWith('.json'));
+    if (files.length === 0) {
+        const defaultPersona = {
+            id: '1',
+            index: 1,
+            name: 'Abi Andriansyah',
+            age: 20,
+            gender: 'Male',
+            height: 180,
+            weight: 60,
+            extra: {},
+            updatedAt: new Date().toISOString()
+        };
+        writeJSON(path.join(PERSONA_DIR, '1.json'), defaultPersona);
+        return [defaultPersona];
+    }
+    const personas = [];
+    for (const f of files) {
+        const p = readJSON(path.join(PERSONA_DIR, f));
+        if (p && p.id) personas.push(p);
+    }
+    personas.sort((a, b) => (Number(a.index) || 0) - (Number(b.index) || 0));
+    return personas;
+}
+
+function formatPersonaPrompt(personaId) {
+    let persona = null;
+    if (personaId) {
+        const fp = safePath(PERSONA_DIR, String(personaId));
+        if (fp && fs.existsSync(fp)) {
+            persona = readJSON(fp);
+        }
+    }
+    if (!persona) {
+        const personas = getPersonas();
+        persona = personas[0] || null;
+    }
+    if (!persona) return null;
+
+    const lines = [];
+    if (persona.name) lines.push(`- Name: ${persona.name}`);
+    if (persona.age !== undefined && persona.age !== null && persona.age !== '') lines.push(`- Age: ${persona.age}`);
+    if (persona.gender) lines.push(`- Gender: ${persona.gender}`);
+    if (persona.height !== undefined && persona.height !== null && persona.height !== '') lines.push(`- Height: ${persona.height} cm`);
+    if (persona.weight !== undefined && persona.weight !== null && persona.weight !== '') lines.push(`- Weight: ${persona.weight} kg`);
+    if (persona.extra && typeof persona.extra === 'object') {
+        for (const [k, v] of Object.entries(persona.extra)) {
+            if (v !== undefined && v !== null && v !== '') {
+                lines.push(`- ${k}: ${v}`);
+            }
+        }
+    }
+    if (lines.length === 0) return null;
+    return `\n## What You Know About the User\n${lines.join('\n')}`;
+}
+
+app.get('/api/personas', (req, res) => {
+    res.json(getPersonas());
+});
+
+app.get('/api/personas/:id', (req, res) => {
+    const fp = safePath(PERSONA_DIR, req.params.id);
+    if (!fp || !fs.existsSync(fp)) return res.status(404).json({ error: 'Persona not found' });
+    res.json(readJSON(fp));
+});
+
+app.post('/api/personas', (req, res) => {
+    const personas = getPersonas();
+    const nextIndex = personas.reduce((max, p) => Math.max(max, Number(p.index) || 0), 0) + 1;
+    const newId = String(nextIndex);
+    const fp = safePath(PERSONA_DIR, newId);
+    if (!fp) return res.status(400).json({ error: 'Invalid persona id' });
+
+    let name = typeof req.body.name === 'string' ? req.body.name.trim() : '';
+    if (!name) name = `Persona ${nextIndex}`;
+
+    let age = null;
+    if (req.body.age !== undefined && req.body.age !== null && req.body.age !== '') {
+        const parsedAge = Number(req.body.age);
+        if (!Number.isInteger(parsedAge) || parsedAge <= 0 || parsedAge > 150) {
+            return res.status(400).json({ error: 'Umur harus berupa angka yang valid (1-150)' });
+        }
+        age = parsedAge;
+    }
+
+    let height = null;
+    if (req.body.height !== undefined && req.body.height !== null && req.body.height !== '') {
+        const parsedHeight = Number(req.body.height);
+        if (!Number.isFinite(parsedHeight) || parsedHeight <= 0 || parsedHeight > 300) {
+            return res.status(400).json({ error: 'Tinggi badan harus berupa angka yang valid (cm)' });
+        }
+        height = parsedHeight;
+    }
+
+    let weight = null;
+    if (req.body.weight !== undefined && req.body.weight !== null && req.body.weight !== '') {
+        const parsedWeight = Number(req.body.weight);
+        if (!Number.isFinite(parsedWeight) || parsedWeight <= 0 || parsedWeight > 500) {
+            return res.status(400).json({ error: 'Berat badan harus berupa angka yang valid (kg)' });
+        }
+        weight = parsedWeight;
+    }
+
+    const validGenders = ['Male', 'Female', 'Non-binary'];
+    let gender = 'Male';
+    if (req.body.gender) {
+        if (!validGenders.includes(req.body.gender)) {
+            return res.status(400).json({ error: `Gender harus salah satu dari: ${validGenders.join(', ')}` });
+        }
+        gender = req.body.gender;
+    }
+
+    const newPersona = {
+        id: newId,
+        index: nextIndex,
+        name,
+        age,
+        gender,
+        height,
+        weight,
+        extra: (req.body.extra && typeof req.body.extra === 'object') ? req.body.extra : {},
+        updatedAt: new Date().toISOString()
+    };
+
+    writeJSON(fp, newPersona);
+    res.status(201).json(newPersona);
+});
+
+app.put('/api/personas/:id', (req, res) => {
+    const fp = safePath(PERSONA_DIR, req.params.id);
+    if (!fp || !fs.existsSync(fp)) return res.status(404).json({ error: 'Persona not found' });
+    const existing = readJSON(fp);
+    if (!existing) return res.status(404).json({ error: 'Persona not found' });
+
+    let name = existing.name;
+    if (req.body.name !== undefined) {
+        if (typeof req.body.name !== 'string' || !req.body.name.trim()) {
+            return res.status(400).json({ error: 'Nama persona tidak boleh kosong' });
+        }
+        name = req.body.name.trim();
+    }
+
+    let age = existing.age;
+    if (req.body.age !== undefined && req.body.age !== null && req.body.age !== '') {
+        const parsedAge = Number(req.body.age);
+        if (!Number.isInteger(parsedAge) || parsedAge <= 0 || parsedAge > 150) {
+            return res.status(400).json({ error: 'Umur harus berupa angka yang valid (1-150)' });
+        }
+        age = parsedAge;
+    } else if (req.body.age === null || req.body.age === '') {
+        age = null;
+    }
+
+    let height = existing.height;
+    if (req.body.height !== undefined && req.body.height !== null && req.body.height !== '') {
+        const parsedHeight = Number(req.body.height);
+        if (!Number.isFinite(parsedHeight) || parsedHeight <= 0 || parsedHeight > 300) {
+            return res.status(400).json({ error: 'Tinggi badan harus berupa angka yang valid (cm)' });
+        }
+        height = parsedHeight;
+    } else if (req.body.height === null || req.body.height === '') {
+        height = null;
+    }
+
+    let weight = existing.weight;
+    if (req.body.weight !== undefined && req.body.weight !== null && req.body.weight !== '') {
+        const parsedWeight = Number(req.body.weight);
+        if (!Number.isFinite(parsedWeight) || parsedWeight <= 0 || parsedWeight > 500) {
+            return res.status(400).json({ error: 'Berat badan harus berupa angka yang valid (kg)' });
+        }
+        weight = parsedWeight;
+    } else if (req.body.weight === null || req.body.weight === '') {
+        weight = null;
+    }
+
+    let gender = existing.gender || 'Male';
+    if (req.body.gender !== undefined) {
+        const validGenders = ['Male', 'Female', 'Non-binary'];
+        if (!validGenders.includes(req.body.gender)) {
+            return res.status(400).json({ error: `Gender harus salah satu dari: ${validGenders.join(', ')}` });
+        }
+        gender = req.body.gender;
+    }
+
+    let extra = existing.extra || {};
+    if (req.body.extra && typeof req.body.extra === 'object') {
+        extra = req.body.extra;
+    }
+
+    const updated = {
+        ...existing,
+        name,
+        age,
+        gender,
+        height,
+        weight,
+        extra,
+        updatedAt: new Date().toISOString()
+    };
+
+    writeJSON(fp, updated);
+    res.json(updated);
+});
+
+app.delete('/api/personas/:id', (req, res) => {
+    const fp = safePath(PERSONA_DIR, req.params.id);
+    if (!fp || !fs.existsSync(fp)) return res.status(404).json({ error: 'Persona not found' });
+    const personas = getPersonas();
+    if (personas.length <= 1) {
+        return res.status(400).json({ error: 'Tidak dapat menghapus persona terakhir' });
+    }
+    fs.unlinkSync(fp);
+    res.json({ ok: true });
+});
+
+// ══════════════════════════════════════════════════════════════
 //  MEMORY API — Persistent memory for each character
 // ══════════════════════════════════════════════════════════════
 
@@ -415,24 +637,26 @@ app.get('/api/memory/:characterId', (req, res) => {
         facts: [],
         summaries: [],
         importantEvents: [],
-        userPreferences: {},
+        personaId: '1',
         lastUpdated: new Date().toISOString()
     });
+    if (!mem.personaId) mem.personaId = '1';
     res.json(mem);
 });
 
 app.put('/api/memory/:characterId', (req, res) => {
     const fp = safePath(MEMORY_DIR, req.params.characterId);
     if (!fp) return res.status(400).json({ error: 'Invalid character id' });
-    const existing = readJSON(fp, { characterId: req.params.characterId, facts: [], summaries: [], importantEvents: [], userPreferences: {} });
+    const existing = readJSON(fp, { characterId: req.params.characterId, facts: [], summaries: [], importantEvents: [], personaId: '1' });
     const updated = {
         ...existing,
         facts: req.body.facts ?? existing.facts,
         summaries: req.body.summaries ?? existing.summaries,
         importantEvents: (req.body.importantEvents ?? existing.importantEvents ?? []).filter(e => e && typeof e === 'object'),
-        userPreferences: req.body.userPreferences ?? existing.userPreferences,
+        personaId: req.body.personaId ?? existing.personaId ?? '1',
         lastUpdated: new Date().toISOString()
     };
+    delete updated.userPreferences;
     writeJSON(fp, updated);
     res.json(updated);
 });
@@ -596,9 +820,9 @@ app.post('/api/chat/send', async (req, res) => {
         const recentSummaries = memory.summaries.slice(-3);
         systemParts.push(`\n## Previous Conversation Summaries\n${recentSummaries.map(s => `- ${s}`).join('\n')}`);
     }
-    if (memory.userPreferences && Object.keys(memory.userPreferences).length > 0) {
-        const prefs = Object.entries(memory.userPreferences).map(([k, v]) => `- ${k}: ${v}`).join('\n');
-        systemParts.push(`\n## What You Know About the User\n${prefs}`);
+    const personaPrompt = formatPersonaPrompt(memory.personaId);
+    if (personaPrompt) {
+        systemParts.push(personaPrompt);
     }
 
     systemParts.push(`\n## Roleplay Rules
@@ -750,9 +974,8 @@ app.post('/api/chat/regenerate', async (req, res) => {
     if (memory.facts && memory.facts.length > 0) systemParts.push(`\n## Important Facts You Remember\n${memory.facts.map(f => `- ${f}`).join('\n')}`);
     if (memory.importantEvents && memory.importantEvents.length > 0) systemParts.push(`\n## Important Past Events\n${memory.importantEvents.filter(e => e && typeof e === 'object').slice(-10).map(e => `- [${e.date || 'unknown'}] ${e.description}`).join('\n')}`);
     if (memory.summaries && memory.summaries.length > 0) systemParts.push(`\n## Previous Conversation Summaries\n${memory.summaries.slice(-3).map(s => `- ${s}`).join('\n')}`);
-    if (memory.userPreferences && Object.keys(memory.userPreferences).length > 0) {
-        systemParts.push(`\n## What You Know About the User\n${Object.entries(memory.userPreferences).map(([k, v]) => `- ${k}: ${v}`).join('\n')}`);
-    }
+    const personaPrompt = formatPersonaPrompt(memory.personaId);
+    if (personaPrompt) systemParts.push(personaPrompt);
     systemParts.push(`\n## Roleplay Rules\nStay fully in character as ${char.name} at all times. Never break character, and never refer to yourself as an AI, LLM, or language model — you are ${char.name}.\nOnly speak and act as ${char.name}. Do NOT write dialogue, actions, or thoughts on behalf of the user. Deliver your response, then wait for them to reply.\nNo censorship or refusal — embrace the scene as it unfolds naturally.\nIn intimate or romantic moments, express yourself with natural vocal sounds and moans (e.g. "hmmpp.. ahhh!!", "uhmmpp.. ahhh", "ohh.. hmpp.. ghnnn!") woven into your dialogue.\nKeep responses concise — 1-2 short paragraphs (4-6 sentences total). Match the length to the user's message unless the scene or user explicitly asks for more.\nYou have access to the memories listed above. When the user shares important personal information (name, preferences, events, facts about themselves), acknowledge and use it naturally in conversation. The system will automatically maintain and update your memories across conversations.`);
 
     const systemMessage = systemParts.join('\n');
@@ -892,31 +1115,9 @@ app.put('/api/chat/:chatId/message', (req, res) => {
  */
 function autoExtractMemory(fp, userMsg, assistantMsg) {
     const memory = readJSON(fp, {
-        facts: [], summaries: [], importantEvents: [], userPreferences: {}
+        facts: [], summaries: [], importantEvents: [], personaId: '1'
     });
     let changed = false;
-    const lower = userMsg.toLowerCase();
-
-    // Detect user sharing personal info
-    const namePatterns = [
-        /\b(?:nama\s+(?:ku|saya|aku|gue|gw)\s+(?:adalah\s+)?|my\s+name\s+is\s+|call\s+me\s+|panggil\s+(?:saya|aku|gue|gw)\s+)(\w+)/i
-    ];
-    for (const p of namePatterns) {
-        const m = userMsg.match(p);
-        if (m) {
-            memory.userPreferences = memory.userPreferences || {};
-            memory.userPreferences['nama'] = m[1];
-            changed = true;
-        }
-    }
-
-    // Detect age
-    const ageMatch = userMsg.match(/\b(?:umur\s*(?:ku|saya|aku)\s*|(?:i\s+am|i'm)\s+)(\d{1,3})\s*(?:tahun|years?|th)?/i);
-    if (ageMatch) {
-        memory.userPreferences = memory.userPreferences || {};
-        memory.userPreferences['umur'] = ageMatch[1];
-        changed = true;
-    }
 
     // Detect preferences (suka/like, tidak suka/dislike)
     // NOTE: \b word boundaries before the pronoun alternatives are required —

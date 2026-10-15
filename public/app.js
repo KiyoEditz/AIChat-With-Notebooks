@@ -11,6 +11,7 @@ let state = {
     currentChatId: null,
     chats: [],
     memory: null,
+    personas: [],
     sending: false,
     config: {},
     characterSearchQuery: '',
@@ -870,12 +871,21 @@ async function openMemoryViewer() {
     const char = state.characters.find(c => c.id === state.currentCharacterId);
     $('#memory-char-name').textContent = char ? char.name : 'Character';
 
-    const memory = await api('GET', `/api/memory/${requestCharacterId}`);
+    const [memory, personas] = await Promise.all([
+        api('GET', `/api/memory/${requestCharacterId}`),
+        api('GET', '/api/personas')
+    ]);
     // Bail out if the user switched characters while this GET was in
     // flight — don't open the memory modal with the WRONG character's data.
     if (state.currentCharacterId !== requestCharacterId) return;
 
+    if (Array.isArray(personas)) {
+        state.personas = personas;
+    }
     state.memory = memory;
+    if (!state.memory.personaId && state.personas.length > 0) {
+        state.memory.personaId = state.personas[0].id;
+    }
     renderMemory();
     openModal('modal-memory');
     closeSidebarOnMobile();
@@ -894,16 +904,8 @@ function renderMemory() {
         </div>
     `).join('') || `<div style="color:var(--text-muted); font-size:0.8rem; padding:8px">${t('memory.empty_facts')}</div>`;
 
-    // User preferences
-    const prefsEl = $('#memory-user-prefs');
-    const prefs = mem.userPreferences || {};
-    prefsEl.innerHTML = Object.entries(prefs).map(([k, v]) => `
-        <div class="memory-item">
-            <span class="memory-item-key">${escapeHtml(k)}</span>
-            <span class="memory-item-text">${escapeHtml(v)}</span>
-            <button class="memory-item-delete" onclick="removeMemoryPref(${escapeHtml(JSON.stringify(k))})">✕</button>
-        </div>
-    `).join('') || `<div style="color:var(--text-muted); font-size:0.8rem; padding:8px">${t('memory.empty_user')}</div>`;
+    // Persona selector
+    renderPersonaSelector();
 
     // Events
     const eventsEl = $('#memory-events');
@@ -925,15 +927,66 @@ function renderMemory() {
     `).join('') || `<div style="color:var(--text-muted); font-size:0.8rem; padding:8px">${t('memory.empty_summary')}</div>`;
 }
 
+function renderPersonaSelector() {
+    const container = $('#memory-persona-selector');
+    const summaryEl = $('#memory-persona-summary');
+    if (!container || !summaryEl) return;
+
+    const personas = state.personas || [];
+    const currentId = String(state.memory?.personaId || (personas[0]?.id || '1'));
+
+    if (personas.length === 0) {
+        container.innerHTML = '<div style="color:var(--text-muted); font-size:0.8rem">Belum ada persona tersimpan.</div>';
+        summaryEl.innerHTML = '';
+        return;
+    }
+
+    container.innerHTML = personas.map(p => {
+        const isSelected = String(p.id) === currentId;
+        return `
+            <button type="button" class="persona-chip-btn ${isSelected ? 'active' : ''}" data-id="${escapeHtml(p.id)}">
+                <span class="persona-chip-index">#${escapeHtml(p.index || p.id)}</span>
+                <span class="persona-chip-name">${escapeHtml(p.name || 'User')}</span>
+            </button>
+        `;
+    }).join('');
+
+    container.querySelectorAll('.persona-chip-btn').forEach(btn => {
+        btn.addEventListener('click', () => {
+            const id = btn.dataset.id;
+            if (state.memory) {
+                state.memory.personaId = id;
+                renderPersonaSelector();
+            }
+        });
+    });
+
+    const activePersona = personas.find(p => String(p.id) === currentId) || personas[0];
+    if (activePersona) {
+        const details = [];
+        if (activePersona.gender) details.push(`Gender: ${escapeHtml(activePersona.gender)}`);
+        if (activePersona.age !== undefined && activePersona.age !== null && activePersona.age !== '') details.push(`Umur: ${escapeHtml(activePersona.age)} th`);
+        if (activePersona.height) details.push(`TB: ${escapeHtml(activePersona.height)} cm`);
+        if (activePersona.weight) details.push(`BB: ${escapeHtml(activePersona.weight)} kg`);
+        if (activePersona.extra && typeof activePersona.extra === 'object') {
+            for (const [k, v] of Object.entries(activePersona.extra)) {
+                if (v) details.push(`${escapeHtml(k)}: ${escapeHtml(v)}`);
+            }
+        }
+        summaryEl.innerHTML = `
+            <div class="persona-active-card">
+                <div class="persona-active-title">👤 ${escapeHtml(activePersona.name || 'User')} <span class="persona-active-tag">Persona #${escapeHtml(activePersona.index || activePersona.id)}</span></div>
+                <div class="persona-active-meta">${details.length > 0 ? details.join(' • ') : 'Tidak ada detail tambahan'}</div>
+            </div>
+        `;
+    } else {
+        summaryEl.innerHTML = '';
+    }
+}
+
 function removeMemoryItem(key, index) {
     if (!state.memory) return;
     state.memory[key].splice(index, 1);
-    renderMemory();
-}
-
-function removeMemoryPref(key) {
-    if (!state.memory) return;
-    delete state.memory.userPreferences[key];
     renderMemory();
 }
 
@@ -944,19 +997,6 @@ function addMemoryFact() {
     state.memory.facts = state.memory.facts || [];
     state.memory.facts.push(val);
     input.value = '';
-    renderMemory();
-}
-
-function addMemoryPref() {
-    const keyInput = $('#memory-new-pref-key');
-    const valInput = $('#memory-new-pref-val');
-    const key = keyInput.value.trim();
-    const val = valInput.value.trim();
-    if (!key || !val || !state.memory) return;
-    state.memory.userPreferences = state.memory.userPreferences || {};
-    state.memory.userPreferences[key] = val;
-    keyInput.value = '';
-    valInput.value = '';
     renderMemory();
 }
 
@@ -1171,7 +1211,6 @@ function bindEvents() {
     $('#btn-save-memory').addEventListener('click', saveMemory);
     $('#btn-summarize-memory').addEventListener('click', summarizeMemory);
     $('#btn-add-fact').addEventListener('click', addMemoryFact);
-    $('#btn-add-pref').addEventListener('click', addMemoryPref);
     $('#btn-add-event').addEventListener('click', addMemoryEvent);
 
     // Character search
@@ -1181,7 +1220,6 @@ function bindEvents() {
     // Enter key in memory inputs
     $('#memory-new-fact').addEventListener('keydown', (e) => { if (e.key === 'Enter') addMemoryFact(); });
     $('#memory-new-event').addEventListener('keydown', (e) => { if (e.key === 'Enter') addMemoryEvent(); });
-    $('#memory-new-pref-val').addEventListener('keydown', (e) => { if (e.key === 'Enter') addMemoryPref(); });
 
     // Sidebar toggle
     $$('.mobile-menu-btn').forEach(btn => {
