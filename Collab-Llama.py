@@ -59,7 +59,7 @@ MODEL_REPO = "mradermacher/EVA-Qwen2.5-14B-v0.2-i1-GGUF:Q6_K"   # ~12.2 GB
 # MODEL_REPO = "richardyoung/Qwen3-14B-abliterated-GGUF:Q6_K"
 # MODEL_REPO = "unsloth/DeepSeek-R1-Distill-Qwen-14B-GGUF:Q6_K"
 
-LLAMA_PORT  = 8080
+LLAMA_PORT  = 9090
 API_KEY     = "sk-colab-local"          # unchanged -- existing .env files
                                          # keep working if you only swap BASE_URL.
 

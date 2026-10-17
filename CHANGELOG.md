@@ -3,6 +3,23 @@
 All notable changes to this project are documented here. Format loosely
 follows [Keep a Changelog](https://keepachangelog.com/).
 
+## [Unreleased] — [Beta / Staging] Molab (Marimo) Support & Blackwell CUDA Build
+
+### Added
+- **`Molab-Llama.py` (Beta / Staging)**:
+  - One-click LLM server script tailored for **Molab** (`molab.marimo.io`), featuring the **NVIDIA RTX PRO 6000 Blackwell Server Edition** (96 GB VRAM) GPU with CUDA 13.3.
+  - Marimo-native pure Python syntax avoiding syntax errors caused by IPython magics like `!cmd`.
+  - Automatic GPU compute capability detection (`sm_120` / `sm_100`).
+  - Robust CUDA toolkit environment resolution (`setup_cuda_toolkit_env()`) resolving `CUDAToolkit_ROOT`, `CUDA_CUDART_LIBRARY`, and driver symlinks so CMake natively discovers CUDA 13.3 runtime without missing `libcudart.so`.
+  - Massive context window default (`NUM_CTX = 16384`) leveraging 96 GB VRAM, with options for 32k/64k.
+  - Multi-tier model configurations optimized for 96GB VRAM (32B Q6_K default, 70B/72B flagship options).
+  - Built-in Hugging Face token resolution (`HF_TOKEN`) from environment variables, Molab Secrets tab, and `/marimo/.env`.
+- **`Build-Molab-CUDA-Release.py` (Dedicated Molab Builder)**:
+  - Standalone CUDA release packager specifically for building and packaging native Blackwell `sm_120` llama-server binary tarballs inside Molab.
+  - Automatically exports release packages to `/marimo/` ready for upload to GitHub Releases.
+
+---
+
 ## [v1.5.0] — Centralized Persona System & Structured User Attributes
 
 Refactors the persona architecture from duplicating `userPreferences` inside every character's memory file into a centralized, reusable persona pool in `data/persona/`, with a dedicated Settings management panel and compact chat memory selector.
