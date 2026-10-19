@@ -3,9 +3,39 @@
 All notable changes to this project are documented here. Format loosely
 follows [Keep a Changelog](https://keepachangelog.com/).
 
-## [Unreleased] — [Beta / Staging] Molab (Marimo) Support & Blackwell CUDA Build
+## [Unreleased]
 
 ### Added
+- **Custom Persona Avatar System**:
+  - Added custom avatar support for user personas across settings, active chat messages, and memory selectors.
+  - **Persona Avatar Management (`settings.html` / `settings.js`)**:
+    - Added dedicated avatar upload container with preview circle and remove button in `#persona-editor-card`.
+    - Integrated automatic client-side canvas image resizing to 256x256 WebP data URLs.
+    - Integrated Pinterest image search and picker directly within the persona editor (`/api/pinterest/search` & `/api/pinterest/image`).
+    - Added avatar preview thumbnails on persona cards in the Settings persona list.
+  - **Dynamic Chat Message Avatars (`public/app.js` / `public/styles.css`)**:
+    - Upgraded user message bubbles (`.message.user .message-avatar`) to dynamically render the active persona's avatar image instead of the static `👤` emoji.
+    - Preserved seamless fallback to `👤` whenever a persona has no avatar assigned.
+  - **Memory Selector Integration (`public/app.js` / `public/styles.css`)**:
+    - Added avatar preview icons inside persona selector chips (`.persona-chip-avatar`) and in the active persona summary card (`.persona-active-avatar`) within the chat memory modal.
+    - Selecting a new persona chip immediately updates user avatars in all rendered chat messages reactively.
+  - **Backend API & Schema (`server.js`)**:
+    - Added `avatar` field handling to `getPersonas()`, `POST /api/personas`, and `PUT /api/personas/:id`.
+- **Chat Message Deletion Endpoint & UI**:
+  - Added REST endpoint `DELETE /api/chat/:chatId/message/:index` in `server.js` with index boundary validation and atomic JSON disk persistence.
+  - Added message deletion button (`🗑️`) beside the edit button (`✏️`) in message metadata (`.message-meta`) with confirmation prompts and localized toast alerts.
+- **Full 12-Language i18n Synchronization (`public/Lang/`)**:
+  - Fully translated and synchronized all 12 supported languages (`AR`, `DE`, `EN`, `ES`, `FR`, `HI`, `ID`, `JP`, `KO`, `PT`, `RU`, `ZH`).
+  - Added localized translation keys across all languages for welcome actions, message editing, message deletion, and async waiting:
+    - `welcome.btn_donate`
+    - `chat.action.regenerate`
+    - `chat.action.delete`
+    - `chat.action.edit`
+    - `chat.confirm_delete_msg`
+    - `chat.msg_deleted`
+    - `btn.edit`
+    - `toast.please_wait`
+  - Normalized all 12 language dictionaries to 105 identical keys with zero missing entries.
 - **`Molab-Llama.py` (Beta / Staging)**:
   - One-click LLM server script tailored for **Molab** (`molab.marimo.io`), featuring the **NVIDIA RTX PRO 6000 Blackwell Server Edition** (96 GB VRAM) GPU with CUDA 13.3.
   - Marimo-native pure Python syntax avoiding syntax errors caused by IPython magics like `!cmd`.
@@ -17,6 +47,17 @@ follows [Keep a Changelog](https://keepachangelog.com/).
 - **`Build-Molab-CUDA-Release.py` (Dedicated Molab Builder)**:
   - Standalone CUDA release packager specifically for building and packaging native Blackwell `sm_120` llama-server binary tarballs inside Molab.
   - Automatically exports release packages to `/marimo/` ready for upload to GitHub Releases.
+
+### Changed & Improved
+- **Persona UI Streamlining & Bug Fixes**:
+  - Removed redundant `Persona #` badge from the persona editor card in Settings and from the active persona summary card in the chat memory modal for a cleaner, minimal appearance.
+  - Resolved cramped layout between the `+ Tambah` extra attribute button and `💾 Simpan Persona` by adding dedicated vertical spacing and an elegant divider border.
+- **Mobile Welcome Viewport & Responsive Layout (`#view-welcome`)**:
+  - Scaled mobile diamond icon (`✦`) up from `2.6rem` to `3rem` for well-balanced visual hierarchy on mobile screens.
+  - Resolved content cut-off and cramped layout on mobile screens by enabling native vertical scrolling (`overflow-y: auto`, `-webkit-overflow-scrolling: touch`) and safe centering (`min-height: 100%; height: auto; margin: auto 0; box-sizing: border-box;`).
+  - Optimized mobile icon and title spacing and aligned "Buka Settings" and "Donasi Proyek" buttons side-by-side on mobile devices (`flex-direction: row; gap: 8px; height: 40px;`).
+- **Clean Regenerate Button UI**:
+  - Preserved standalone regenerate button (`🔄`) on assistant message bubbles and removed adjacent delete triggers to prevent accidental deletions during chat.
 
 ---
 

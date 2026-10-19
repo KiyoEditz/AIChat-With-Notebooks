@@ -1,7 +1,7 @@
 /* ═══════════════════════════════════════════════════════════
    Settings — dedicated page (not a modal)
    Tabs: Configuration · Appearance · Notifications · Data & backup
-   Reuses variables, fonts and .btn-*/.form-* classes from
+   Reuses variables, fonts and .btn-* / .form-* classes from
    styles.css; only page-specific layout lives here.
    ═══════════════════════════════════════════════════════════ */
 
@@ -457,6 +457,39 @@ body.settings-page {
     color: #fff;
 }
 
+.persona-card-body {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin-top: 6px;
+}
+
+.persona-card-avatar {
+    width: 38px;
+    height: 38px;
+    border-radius: 50%;
+    background: var(--bg-tertiary);
+    border: 1px solid var(--border-color);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    overflow: hidden;
+    flex-shrink: 0;
+    font-size: 1.1rem;
+}
+
+.persona-card-avatar img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    border-radius: 50%;
+}
+
+.persona-card-info {
+    flex: 1;
+    min-width: 0;
+}
+
 .persona-card-name {
     font-size: 14px;
     font-weight: 600;
@@ -469,7 +502,33 @@ body.settings-page {
 .persona-card-meta {
     font-size: 11.5px;
     color: var(--text-muted);
-    margin-top: 3px;
+    margin-top: 2px;
+}
+
+.form-row-avatar-name {
+    display: flex;
+    gap: 16px;
+    align-items: flex-start;
+    margin-bottom: 14px;
+}
+
+.persona-avatar-upload-group {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 6px;
+    flex-shrink: 0;
+}
+
+@media (max-width: 600px) {
+    .form-row-avatar-name {
+        flex-direction: column;
+        align-items: stretch;
+        gap: 12px;
+    }
+    .persona-avatar-upload-group {
+        align-items: flex-start;
+    }
 }
 
 .persona-editor-card {
@@ -516,6 +575,7 @@ body.settings-page {
     margin-top: 18px;
     padding-top: 18px;
     border-top: 1px solid var(--border-color);
+    margin-bottom: 24px;
 }
 
 .form-sublabel {
@@ -596,4 +656,11 @@ body.settings-page {
 .btn-danger-outline:hover {
     background: rgba(239, 68, 68, 0.1);
     border-color: #ef4444;
+}
+
+.persona-editor-card .settings-actions {
+    margin-top: 24px;
+    margin-bottom: 0;
+    padding-top: 20px;
+    border-top: 1px solid var(--border-color);
 }

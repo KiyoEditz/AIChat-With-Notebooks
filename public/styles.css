@@ -515,6 +515,12 @@ body {
 }
 
 /* ═══ WELCOME SCREEN ═══ */
+#view-welcome {
+    overflow-y: auto;
+    overflow-x: hidden;
+    -webkit-overflow-scrolling: touch;
+}
+
 .welcome-menu-btn {
     position: absolute;
     top: 16px;
@@ -527,10 +533,13 @@ body {
     flex-direction: column;
     align-items: center;
     justify-content: center;
-    height: 100%;
+    min-height: 100%;
+    height: auto;
     text-align: center;
     padding: 40px;
     gap: 16px;
+    box-sizing: border-box;
+    margin: auto 0;
 }
 
 .welcome-icon {
@@ -912,6 +921,11 @@ body {
         opacity: 1;
         pointer-events: auto;
     }
+}
+
+.message-action-btn.message-delete-btn:hover {
+    color: var(--danger);
+    opacity: 1;
 }
 
 .alternate-nav {
@@ -1533,6 +1547,27 @@ select.form-input {
     box-shadow: 0 0 0 1px var(--accent-primary);
 }
 
+.persona-chip-avatar {
+    width: 20px;
+    height: 20px;
+    border-radius: 50%;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    overflow: hidden;
+    background: var(--bg-secondary);
+    border: 1px solid var(--border-color);
+    flex-shrink: 0;
+    font-size: 0.65rem;
+}
+
+.persona-chip-avatar img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    border-radius: 50%;
+}
+
 .persona-chip-index {
     font-size: 0.75rem;
     font-weight: 700;
@@ -1544,11 +1579,41 @@ select.form-input {
 }
 
 .persona-active-card {
+    display: flex;
+    align-items: center;
+    gap: 12px;
     background: var(--bg-tertiary);
     border: 1px solid var(--border-color);
     border-radius: var(--radius-sm);
     padding: 10px 14px;
     margin-bottom: 10px;
+}
+
+.persona-active-avatar {
+    width: 44px;
+    height: 44px;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    overflow: hidden;
+    background: var(--bg-secondary);
+    border: 2px solid var(--accent-primary);
+    box-shadow: 0 0 10px var(--accent-primary-glow);
+    flex-shrink: 0;
+    font-size: 1.3rem;
+}
+
+.persona-active-avatar img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    border-radius: 50%;
+}
+
+.persona-active-info {
+    flex: 1;
+    min-width: 0;
 }
 
 .persona-active-title {
@@ -1687,11 +1752,51 @@ select.form-input {
     }
 
     .welcome-container {
-        padding: 20px;
+        padding: 24px 16px 36px;
+        gap: 12px;
+    }
+
+    .welcome-icon {
+        font-size: 3rem;
+        margin-bottom: 2px;
     }
 
     .welcome-container h1 {
-        font-size: 1.6rem;
+        font-size: 1.45rem;
+        letter-spacing: -0.02em;
+    }
+
+    .welcome-subtitle {
+        font-size: 0.88rem;
+        margin-bottom: 8px;
+    }
+
+    .welcome-steps {
+        gap: 8px;
+        margin: 10px 0 16px;
+        max-width: 380px;
+        width: 100%;
+    }
+
+    .step {
+        padding: 9px 12px;
+        gap: 10px;
+        border-radius: var(--radius-sm);
+    }
+
+    .step-num {
+        width: 24px;
+        height: 24px;
+        min-width: 24px;
+        font-size: 0.72rem;
+    }
+
+    .step-text strong {
+        font-size: 0.84rem;
+    }
+
+    .step-text span {
+        font-size: 0.74rem;
     }
 
     .form-row {
@@ -1699,20 +1804,25 @@ select.form-input {
     }
 
     .welcome-actions {
-        max-width: 100%;
-    }
-}
-
-@media (max-width: 440px) {
-    .welcome-actions {
-        flex-direction: column;
-        gap: 10px;
+        width: 100%;
+        max-width: 380px;
+        gap: 8px;
+        flex-direction: row;
+        margin-top: 2px;
     }
 
     .welcome-actions .btn-primary,
     .welcome-actions .btn-donate-welcome {
-        width: 100%;
-        flex: none;
+        height: 40px;
+        padding: 0 10px;
+        font-size: 0.8rem;
+        gap: 6px;
+    }
+
+    .welcome-actions .btn-primary svg,
+    .welcome-actions .btn-donate-welcome svg {
+        width: 16px;
+        height: 16px;
     }
 }
 

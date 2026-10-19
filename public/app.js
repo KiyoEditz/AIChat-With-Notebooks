@@ -29,21 +29,35 @@ const $$ = (sel) => document.querySelectorAll(sel);
 
 // ── Avatar Helper ────────────────────────────────────────
 function getAvatarInnerHtml(avatar, name) {
-    if (avatar && avatar.startsWith('data:')) {
+    if (avatar && (avatar.startsWith('data:') || avatar.startsWith('http://') || avatar.startsWith('https://') || avatar.startsWith('/'))) {
         return `<img src="${escapeHtml(avatar)}" alt="${escapeHtml(name || 'avatar')}">`;
     }
-    // Not a data: URI — normally just a single emoji/letter placeholder,
-    // but `avatar` can be set to an arbitrary string via the API directly
-    // (bypassing the upload/Pinterest flows that always produce a data:
-    // URI), so it must be escaped like every other injected value here.
     return escapeHtml(avatar || (name ? name.charAt(0).toUpperCase() : 'A'));
+}
+
+function getActivePersona() {
+    if (!state.personas || state.personas.length === 0) return null;
+    const personaId = state.memory?.personaId;
+    if (personaId) {
+        const found = state.personas.find(p => String(p.id) === String(personaId));
+        if (found) return found;
+    }
+    return state.personas[0] || null;
+}
+
+function getUserAvatarInnerHtml() {
+    const persona = getActivePersona();
+    if (persona && persona.avatar) {
+        return getAvatarInnerHtml(persona.avatar, persona.name || 'User');
+    }
+    return '👤';
 }
 
 function updateAvatarPreview(avatarData) {
     const preview = $('#avatar-preview');
     const removeBtn = $('#avatar-remove-btn');
     if (!preview || !removeBtn) return;
-    if (avatarData && avatarData.startsWith('data:')) {
+    if (avatarData && (avatarData.startsWith('data:') || avatarData.startsWith('http://') || avatarData.startsWith('https://') || avatarData.startsWith('/'))) {
         preview.innerHTML = `<img src="${escapeHtml(avatarData)}" alt="avatar">`;
         preview.classList.add('has-image');
         removeBtn.style.display = 'flex';
@@ -68,14 +82,25 @@ document.addEventListener('DOMContentLoaded', async () => {
         console.error('Failed to load config', err);
     }
     try {
-        await loadCharacters();
+        await Promise.all([loadCharacters(), loadPersonas()]);
     } catch (err) {
-        console.error('Failed to load characters', err);
+        console.error('Failed to load characters or personas', err);
         if (typeof toast === 'function') toast('Failed to load data from server. Check that the server is running.', 'error');
     }
     testConnection();
     bindEvents(); // must always run so the UI stays interactive even if the above failed
 });
+
+async function loadPersonas() {
+    try {
+        const personas = await api('GET', '/api/personas');
+        if (Array.isArray(personas)) {
+            state.personas = personas;
+        }
+    } catch (err) {
+        console.error('Failed to load personas', err);
+    }
+}
 
 // ══════════════════════════════════════════════════════════
 //  API Helpers
@@ -247,13 +272,19 @@ async function selectCharacter(id) {
     state.currentChatId = null;
     renderCharacterList();
 
-    // Load chats for this character
-    const chats = await api('GET', `/api/chats/${id}`);
+    // Load chats and memory for this character in parallel
+    const [chats, memory] = await Promise.all([
+        api('GET', `/api/chats/${id}`),
+        api('GET', `/api/memory/${id}`)
+    ]);
     // The user may have already clicked a different character while this
     // GET was in flight — don't let a slower, stale response overwrite
     // whatever character they've since switched to.
     if (state.currentCharacterId !== id) return;
-    state.chats = chats;
+    state.chats = Array.isArray(chats) ? chats : [];
+    if (memory && !memory.error) {
+        state.memory = memory;
+    }
     renderChatList();
 
     const char = state.characters.find(c => c.id === id);
@@ -493,7 +524,8 @@ function renderMessages(messages) {
 
     container.innerHTML = messages.map((m, index) => {
         const time = m.timestamp ? formatTime(m.timestamp) : '';
-        const avatar = m.role === 'user' ? '👤' : charAvatar;
+        const userAvatar = getUserAvatarInnerHtml();
+        const avatar = m.role === 'user' ? userAvatar : charAvatar;
         const isLastAssistant = m.role === 'assistant' && index === messages.length - 1;
 
         let contentHtml = formatMessageContent(m.content);
@@ -513,7 +545,7 @@ function renderMessages(messages) {
             contentHtml = formatMessageContent(m.alternates[selIdx] || m.content);
         }
 
-        const regenerateBtn = isLastAssistant ? `<button class="regenerate-btn" onclick="regenerateLastMessage()" title="Regenerate">🔄</button>` : '';
+        const regenerateBtn = isLastAssistant ? `<button class="regenerate-btn" onclick="regenerateLastMessage()" title="${t('chat.action.regenerate') || 'Regenerate'}">🔄</button>` : '';
         const touchEvents = isLastAssistant ? 'ontouchstart="handleTouchStart(event)" ontouchend="handleTouchEnd(event, this)"' : '';
 
         return `
@@ -527,7 +559,8 @@ function renderMessages(messages) {
                     ${alternatesHtml}
                     <div class="message-meta">
                         ${time ? `<span class="message-time">${time}</span>` : ''}
-                        <button class="message-action-btn" onclick="editMessage(${index})" title="Edit">✏️</button>
+                        <button class="message-action-btn" onclick="editMessage(${index})" title="${t('chat.action.edit') || t('btn.edit') || 'Edit'}">✏️</button>
+                        <button class="message-action-btn message-delete-btn" onclick="deleteMessage(${index})" title="${t('chat.action.delete') || 'Hapus'}">🗑️</button>
                     </div>
                 </div>
             </div>`;
@@ -553,12 +586,13 @@ function appendMessage(role, content, isLastAssistant = false) {
         });
     }
 
-    const avatar = role === 'user' ? '👤' : charAvatar;
+    const userAvatar = getUserAvatarInnerHtml();
+    const avatar = role === 'user' ? userAvatar : charAvatar;
     const time = formatTime(new Date().toISOString());
-    const regenerateBtn = isLastAssistant ? `<button class="regenerate-btn" onclick="regenerateLastMessage()" title="Regenerate">🔄</button>` : '';
+    const index = document.querySelectorAll('#chat-messages .message').length;
+    const regenerateBtn = isLastAssistant ? `<button class="regenerate-btn" onclick="regenerateLastMessage()" title="${t('chat.action.regenerate') || 'Regenerate'}">🔄</button>` : '';
     const touchEvents = isLastAssistant ? 'ontouchstart="handleTouchStart(event)" ontouchend="handleTouchEnd(event, this)"' : '';
 
-    const index = document.querySelectorAll('#chat-messages .message').length;
     const div = document.createElement('div');
     div.className = `message ${role}`;
     div.dataset.index = index;
@@ -571,7 +605,8 @@ function appendMessage(role, content, isLastAssistant = false) {
             </div>
             <div class="message-meta">
                 <span class="message-time">${time}</span>
-                <button class="message-action-btn" onclick="editMessage(${index})" title="Edit">✏️</button>
+                <button class="message-action-btn" onclick="editMessage(${index})" title="${t('chat.action.edit') || t('btn.edit') || 'Edit'}">✏️</button>
+                <button class="message-action-btn message-delete-btn" onclick="deleteMessage(${index})" title="${t('chat.action.delete') || 'Hapus'}">🗑️</button>
             </div>
         </div>`;
     container.appendChild(div);
@@ -860,6 +895,28 @@ window.saveEdit = async function (index) {
     }
 };
 
+window.deleteMessage = async function (index) {
+    if (!state.currentChatId || state.sending) return;
+    const confirmText = t('chat.confirm_delete_msg') || 'Hapus pesan ini dari percakapan?';
+    if (!confirm(confirmText)) return;
+
+    const requestChatId = state.currentChatId;
+    try {
+        const result = await api('DELETE', `/api/chat/${requestChatId}/message/${index}`);
+        if (result.error) {
+            toast(result.error, 'error');
+            return;
+        }
+
+        if (state.currentChatId === requestChatId) {
+            await loadChat(requestChatId);
+            toast(t('chat.msg_deleted') || 'Pesan berhasil dihapus');
+        }
+    } catch (err) {
+        toast(`Error: ${err.message}`, 'error');
+    }
+};
+
 // ══════════════════════════════════════════════════════════
 //  MEMORY
 // ══════════════════════════════════════════════════════════
@@ -945,6 +1002,7 @@ function renderPersonaSelector() {
         const isSelected = String(p.id) === currentId;
         return `
             <button type="button" class="persona-chip-btn ${isSelected ? 'active' : ''}" data-id="${escapeHtml(p.id)}">
+                <span class="persona-chip-avatar">${getAvatarInnerHtml(p.avatar, p.name || 'User')}</span>
                 <span class="persona-chip-index">#${escapeHtml(p.index || p.id)}</span>
                 <span class="persona-chip-name">${escapeHtml(p.name || 'User')}</span>
             </button>
@@ -957,6 +1015,10 @@ function renderPersonaSelector() {
             if (state.memory) {
                 state.memory.personaId = id;
                 renderPersonaSelector();
+                const currentChat = state.chats.find(c => c.id === state.currentChatId);
+                if (currentChat && currentChat.messages) {
+                    renderMessages(currentChat.messages);
+                }
             }
         });
     });
@@ -975,8 +1037,11 @@ function renderPersonaSelector() {
         }
         summaryEl.innerHTML = `
             <div class="persona-active-card">
-                <div class="persona-active-title">👤 ${escapeHtml(activePersona.name || 'User')} <span class="persona-active-tag">Persona #${escapeHtml(activePersona.index || activePersona.id)}</span></div>
-                <div class="persona-active-meta">${details.length > 0 ? details.join(' • ') : 'Tidak ada detail tambahan'}</div>
+                <div class="persona-active-avatar">${getAvatarInnerHtml(activePersona.avatar, activePersona.name || 'User')}</div>
+                <div class="persona-active-info">
+                    <div class="persona-active-title">${escapeHtml(activePersona.name || 'User')}</div>
+                    <div class="persona-active-meta">${details.length > 0 ? details.join(' • ') : 'Tidak ada detail tambahan'}</div>
+                </div>
             </div>
         `;
     } else {

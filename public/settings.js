@@ -191,6 +191,13 @@
             .replace(/'/g, '&#039;');
     }
 
+    function getAvatarInnerHtml(avatar, name) {
+        if (avatar && (avatar.startsWith('data:') || avatar.startsWith('http://') || avatar.startsWith('https://') || avatar.startsWith('/'))) {
+            return `<img src="${escapeHtml(avatar)}" alt="${escapeHtml(name || 'avatar')}">`;
+        }
+        return escapeHtml(avatar || (name ? name.charAt(0).toUpperCase() : '👤'));
+    }
+
     const personaNameInput = document.getElementById('persona-name');
     const personaAgeInput = document.getElementById('persona-age');
     const personaGenderInput = document.getElementById('persona-gender');
@@ -199,6 +206,227 @@
     const personaBadgeIndex = document.getElementById('persona-badge-index');
     const btnDeletePersona = document.getElementById('btn-delete-persona');
     const personaSaveIndicator = document.getElementById('persona-save-indicator');
+
+    // Avatar & Pinterest elements
+    const personaAvatarInput = document.getElementById('persona-avatar');
+    const personaAvatarFile = document.getElementById('persona-avatar-file');
+    const personaAvatarPreview = document.getElementById('persona-avatar-preview');
+    const personaAvatarRemoveBtn = document.getElementById('persona-avatar-remove-btn');
+    const personaPinterestToggle = document.getElementById('persona-pinterest-toggle');
+    const personaPinterestPanel = document.getElementById('persona-pinterest-panel');
+    const personaPinterestQuery = document.getElementById('persona-pinterest-query');
+    const personaPinterestSearchBtn = document.getElementById('persona-pinterest-search-btn');
+    const personaPinterestResults = document.getElementById('persona-pinterest-results');
+    const personaPinterestThumb = document.getElementById('persona-pinterest-thumb');
+    const personaPinterestCounter = document.getElementById('persona-pinterest-counter');
+    const personaPinterestPrevBtn = document.getElementById('persona-pinterest-prev-btn');
+    const personaPinterestNextBtn = document.getElementById('persona-pinterest-next-btn');
+    const personaPinterestUseBtn = document.getElementById('persona-pinterest-use-btn');
+    const personaPinterestStatus = document.getElementById('persona-pinterest-status');
+
+    function updatePersonaAvatarPreview(avatarData) {
+        if (!personaAvatarPreview || !personaAvatarRemoveBtn) return;
+        if (avatarData && (avatarData.startsWith('data:') || avatarData.startsWith('http://') || avatarData.startsWith('https://') || avatarData.startsWith('/'))) {
+            personaAvatarPreview.innerHTML = `<img src="${escapeHtml(avatarData)}" alt="avatar">`;
+            personaAvatarPreview.classList.add('has-image');
+            personaAvatarRemoveBtn.style.display = 'flex';
+        } else {
+            personaAvatarPreview.innerHTML = `
+                <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+                    <polyline points="17 8 12 3 7 8"/>
+                    <line x1="12" y1="3" x2="12" y2="15"/>
+                </svg>
+                <span>Upload</span>`;
+            personaAvatarPreview.classList.remove('has-image');
+            personaAvatarRemoveBtn.style.display = 'none';
+        }
+    }
+
+    function handlePersonaAvatarUpload(e) {
+        const file = e.target.files && e.target.files[0];
+        if (!file) return;
+
+        if (!file.type.startsWith('image/')) {
+            alert('Pilih file gambar (JPG, PNG, GIF, WebP)');
+            return;
+        }
+
+        if (file.size > 5 * 1024 * 1024) {
+            alert('Ukuran file maksimal 5MB');
+            return;
+        }
+
+        const reader = new FileReader();
+        reader.onload = function(event) {
+            const img = new Image();
+            img.onload = function() {
+                const canvas = document.createElement('canvas');
+                const MAX_SIZE = 256;
+                let width = img.width;
+                let height = img.height;
+
+                if (width > height) {
+                    if (width > MAX_SIZE) {
+                        height *= MAX_SIZE / width;
+                        width = MAX_SIZE;
+                    }
+                } else {
+                    if (height > MAX_SIZE) {
+                        width *= MAX_SIZE / height;
+                        height = MAX_SIZE;
+                    }
+                }
+
+                canvas.width = width;
+                canvas.height = height;
+                const ctx = canvas.getContext('2d');
+                ctx.drawImage(img, 0, 0, width, height);
+
+                const dataUrl = canvas.toDataURL('image/webp', 0.85);
+                if (personaAvatarInput) personaAvatarInput.value = dataUrl;
+                updatePersonaAvatarPreview(dataUrl);
+            };
+            img.src = event.target.result;
+        };
+        reader.readAsDataURL(file);
+    }
+
+    function removePersonaAvatar() {
+        if (personaAvatarInput) personaAvatarInput.value = '';
+        if (personaAvatarFile) personaAvatarFile.value = '';
+        updatePersonaAvatarPreview('');
+    }
+
+    let personaPinterest = { results: [], index: 0, loading: false };
+
+    function togglePersonaPinterest() {
+        if (!personaPinterestPanel) return;
+        const isVisible = personaPinterestPanel.style.display !== 'none';
+        personaPinterestPanel.style.display = isVisible ? 'none' : 'block';
+        if (personaPinterestToggle) personaPinterestToggle.classList.toggle('active', !isVisible);
+        if (!isVisible && personaPinterestQuery && !personaPinterestQuery.value) {
+            personaPinterestQuery.value = personaNameInput.value.trim() || 'anime avatar';
+            searchPersonaPinterest();
+        }
+    }
+
+    async function searchPersonaPinterest() {
+        const query = personaPinterestQuery ? personaPinterestQuery.value.trim() : '';
+        if (!query || personaPinterest.loading) return;
+        personaPinterest.loading = true;
+        if (personaPinterestStatus) personaPinterestStatus.textContent = 'Mencari di Pinterest...';
+        if (personaPinterestResults) personaPinterestResults.style.display = 'none';
+
+        try {
+            const data = await api('GET', `/api/pinterest/search?query=${encodeURIComponent(query)}`);
+            if (data && data.success && Array.isArray(data.images) && data.images.length > 0) {
+                personaPinterest.results = data.images;
+                personaPinterest.index = 0;
+                showPersonaPinterestResult();
+                if (personaPinterestStatus) personaPinterestStatus.textContent = `Ditemukan ${data.images.length} gambar.`;
+            } else {
+                if (personaPinterestStatus) personaPinterestStatus.textContent = data.error || 'Tidak ada gambar ditemukan. Coba kata kunci lain.';
+            }
+        } catch (err) {
+            if (personaPinterestStatus) personaPinterestStatus.textContent = 'Gagal mencari gambar.';
+        } finally {
+            personaPinterest.loading = false;
+        }
+    }
+
+    function showPersonaPinterestResult() {
+        const { results, index } = personaPinterest;
+        if (!results.length || !personaPinterestThumb || !personaPinterestResults) return;
+        const url = results[index];
+        personaPinterestThumb.src = `/api/pinterest/image?url=${encodeURIComponent(url)}`;
+        if (personaPinterestCounter) personaPinterestCounter.textContent = `${index + 1} / ${results.length}`;
+        personaPinterestResults.style.display = 'flex';
+    }
+
+    async function usePersonaPinterestImage() {
+        const { results, index } = personaPinterest;
+        if (!results.length) return;
+        const proxyUrl = `/api/pinterest/image?url=${encodeURIComponent(results[index])}`;
+        if (personaPinterestStatus) personaPinterestStatus.textContent = 'Memproses avatar...';
+
+        try {
+            const res = await fetch(proxyUrl);
+            const blob = await res.blob();
+            const reader = new FileReader();
+            reader.onload = function(e) {
+                const img = new Image();
+                img.onload = function() {
+                    const canvas = document.createElement('canvas');
+                    const MAX_SIZE = 256;
+                    let width = img.width;
+                    let height = img.height;
+                    if (width > height) {
+                        if (width > MAX_SIZE) {
+                            height *= MAX_SIZE / width;
+                            width = MAX_SIZE;
+                        }
+                    } else {
+                        if (height > MAX_SIZE) {
+                            width *= MAX_SIZE / height;
+                            height = MAX_SIZE;
+                        }
+                    }
+                    canvas.width = width;
+                    canvas.height = height;
+                    const ctx = canvas.getContext('2d');
+                    ctx.drawImage(img, 0, 0, width, height);
+                    const resizedDataUrl = canvas.toDataURL('image/webp', 0.85);
+                    if (personaAvatarInput) personaAvatarInput.value = resizedDataUrl;
+                    updatePersonaAvatarPreview(resizedDataUrl);
+                    if (personaPinterestStatus) personaPinterestStatus.textContent = '✅ Avatar terpasang dari Pinterest.';
+                };
+                img.src = e.target.result;
+            };
+            reader.readAsDataURL(blob);
+        } catch (err) {
+            if (personaPinterestStatus) personaPinterestStatus.textContent = 'Gagal memproses gambar.';
+        }
+    }
+
+    if (personaAvatarPreview && personaAvatarFile) {
+        personaAvatarPreview.addEventListener('click', () => personaAvatarFile.click());
+        personaAvatarFile.addEventListener('change', handlePersonaAvatarUpload);
+    }
+    if (personaAvatarRemoveBtn) {
+        personaAvatarRemoveBtn.addEventListener('click', removePersonaAvatar);
+    }
+    if (personaPinterestToggle) {
+        personaPinterestToggle.addEventListener('click', togglePersonaPinterest);
+    }
+    if (personaPinterestSearchBtn) {
+        personaPinterestSearchBtn.addEventListener('click', searchPersonaPinterest);
+    }
+    if (personaPinterestQuery) {
+        personaPinterestQuery.addEventListener('keydown', (e) => {
+            if (e.key === 'Enter') {
+                e.preventDefault();
+                searchPersonaPinterest();
+            }
+        });
+    }
+    if (personaPinterestPrevBtn) {
+        personaPinterestPrevBtn.addEventListener('click', () => {
+            if (!personaPinterest.results.length) return;
+            personaPinterest.index = (personaPinterest.index - 1 + personaPinterest.results.length) % personaPinterest.results.length;
+            showPersonaPinterestResult();
+        });
+    }
+    if (personaPinterestNextBtn) {
+        personaPinterestNextBtn.addEventListener('click', () => {
+            if (!personaPinterest.results.length) return;
+            personaPinterest.index = (personaPinterest.index + 1) % personaPinterest.results.length;
+            showPersonaPinterestResult();
+        });
+    }
+    if (personaPinterestUseBtn) {
+        personaPinterestUseBtn.addEventListener('click', usePersonaPinterestImage);
+    }
 
     // Strict number-only restriction on typing / pasting for Age, Height, Weight
     [personaAgeInput, personaHeightInput, personaWeightInput].forEach(inp => {
@@ -291,9 +519,14 @@
                         <span class="persona-card-num">#${escapeHtml(p.index || p.id)}</span>
                         ${isActive ? '<span class="persona-active-badge">Aktif Diedit</span>' : ''}
                     </div>
-                    <div class="persona-card-name">${escapeHtml(p.name || 'Tanpa Nama')}</div>
-                    <div class="persona-card-meta">
-                        ${p.gender ? escapeHtml(p.gender) : 'Male'} • ${p.age ? escapeHtml(p.age) + ' th' : '-'}
+                    <div class="persona-card-body">
+                        <div class="persona-card-avatar">${getAvatarInnerHtml(p.avatar, p.name || 'User')}</div>
+                        <div class="persona-card-info">
+                            <div class="persona-card-name">${escapeHtml(p.name || 'Tanpa Nama')}</div>
+                            <div class="persona-card-meta">
+                                ${p.gender ? escapeHtml(p.gender) : 'Male'} • ${p.age ? escapeHtml(p.age) + ' th' : '-'}
+                            </div>
+                        </div>
                     </div>
                 </div>
             `;
@@ -311,8 +544,13 @@
         const p = personaState.personas.find(item => String(item.id) === String(id));
         if (!p) return;
 
-        personaBadgeIndex.textContent = `Persona #${p.index || p.id}`;
+        if (personaBadgeIndex) personaBadgeIndex.textContent = `Persona #${p.index || p.id}`;
         personaNameInput.value = p.name || '';
+        if (personaAvatarInput) personaAvatarInput.value = p.avatar || '';
+        updatePersonaAvatarPreview(p.avatar || '');
+        if (personaPinterestPanel) personaPinterestPanel.style.display = 'none';
+        if (personaPinterestToggle) personaPinterestToggle.classList.remove('active');
+
         personaAgeInput.value = (p.age !== undefined && p.age !== null) ? p.age : '';
         personaGenderInput.value = p.gender || 'Male';
         personaHeightInput.value = (p.height !== undefined && p.height !== null) ? p.height : '';
@@ -320,8 +558,15 @@
         personaState.extra = Object.assign({}, p.extra || {});
         renderExtraAttributes();
 
-        // Show delete button only if there is more than 1 persona
-        btnDeletePersona.style.display = personaState.personas.length > 1 ? 'inline-flex' : 'none';
+        // Show delete button and header only if there is more than 1 persona
+        const canDelete = personaState.personas.length > 1;
+        const editorHeader = document.getElementById('persona-editor-header');
+        if (editorHeader) {
+            editorHeader.style.display = canDelete ? 'flex' : 'none';
+        }
+        if (btnDeletePersona) {
+            btnDeletePersona.style.display = canDelete ? 'inline-flex' : 'none';
+        }
 
         renderPersonaCards();
     }
@@ -343,7 +588,8 @@
         const nextNum = personaState.personas.length + 1;
         const newPersona = await api('POST', '/api/personas', {
             name: `Persona ${nextNum}`,
-            gender: 'Male'
+            gender: 'Male',
+            avatar: ''
         });
         if (newPersona && newPersona.id) {
             personaState.personas.push(newPersona);
@@ -381,10 +627,12 @@
         const heightStr = personaHeightInput.value.trim();
         const weightStr = personaWeightInput.value.trim();
         const gender = personaGenderInput.value;
+        const avatar = personaAvatarInput ? personaAvatarInput.value.trim() : '';
 
         const body = {
             name,
             gender,
+            avatar,
             age: ageStr ? parseInt(ageStr, 10) : null,
             height: heightStr ? parseInt(heightStr, 10) : null,
             weight: weightStr ? parseInt(weightStr, 10) : null,

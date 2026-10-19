@@ -416,6 +416,7 @@ function getPersonas() {
             id: '1',
             index: 1,
             name: 'Abi Andriansyah',
+            avatar: '',
             age: 20,
             gender: 'Male',
             height: 180,
@@ -429,7 +430,10 @@ function getPersonas() {
     const personas = [];
     for (const f of files) {
         const p = readJSON(path.join(PERSONA_DIR, f));
-        if (p && p.id) personas.push(p);
+        if (p && p.id) {
+            if (p.avatar === undefined) p.avatar = '';
+            personas.push(p);
+        }
     }
     personas.sort((a, b) => (Number(a.index) || 0) - (Number(b.index) || 0));
     return personas;
@@ -522,10 +526,13 @@ app.post('/api/personas', (req, res) => {
         gender = req.body.gender;
     }
 
+    const avatar = typeof req.body.avatar === 'string' ? req.body.avatar.trim() : '';
+
     const newPersona = {
         id: newId,
         index: nextIndex,
         name,
+        avatar,
         age,
         gender,
         height,
@@ -599,9 +606,15 @@ app.put('/api/personas/:id', (req, res) => {
         extra = req.body.extra;
     }
 
+    let avatar = existing.avatar || '';
+    if (req.body.avatar !== undefined) {
+        avatar = typeof req.body.avatar === 'string' ? req.body.avatar.trim() : '';
+    }
+
     const updated = {
         ...existing,
         name,
+        avatar,
         age,
         gender,
         height,
@@ -1097,6 +1110,29 @@ app.put('/api/chat/:chatId/message', (req, res) => {
     writeJSON(fp, chat);
 
     res.json({ ok: true });
+});
+
+// ══════════════════════════════════════════════════════════════
+//  DELETE MESSAGE
+// ══════════════════════════════════════════════════════════════
+
+app.delete('/api/chat/:chatId/message/:index', (req, res) => {
+    const messageIndex = Number(req.params.index);
+    const fp = safePath(CHATS_DIR, req.params.chatId);
+    if (!fp) return res.status(400).json({ error: 'Invalid chat id' });
+
+    const chat = readJSON(fp);
+    if (!chat || !Array.isArray(chat.messages) || !Number.isInteger(messageIndex) ||
+        messageIndex < 0 || messageIndex >= chat.messages.length) {
+        return res.status(404).json({ error: 'Message not found' });
+    }
+
+    // Remove the message
+    chat.messages.splice(messageIndex, 1);
+    chat.updatedAt = new Date().toISOString();
+    writeJSON(fp, chat);
+
+    res.json({ ok: true, remaining: chat.messages.length });
 });
 
 /**

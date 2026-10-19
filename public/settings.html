@@ -89,16 +89,54 @@
                     </div>
 
                     <div class="persona-editor-card" id="persona-editor-card">
-                        <div class="persona-editor-header">
-                            <span class="persona-badge" id="persona-badge-index">Persona #1</span>
+                        <div class="persona-editor-header" id="persona-editor-header" style="display:none">
                             <div style="flex:1"></div>
                             <button class="btn-danger-outline" id="btn-delete-persona" type="button" style="display:none">🗑️ Hapus</button>
                         </div>
 
-                        <div class="form-group">
-                            <label for="persona-name">📛 Nama (Name)</label>
-                            <input type="text" id="persona-name" placeholder="Nama atau panggilan..." class="form-input">
-                            <span class="form-hint">Dapat berupa huruf atau angka</span>
+                        <div class="form-row-avatar-name">
+                            <div class="form-group persona-avatar-upload-group">
+                                <label>🎨 Avatar</label>
+                                <div class="avatar-upload-container" id="persona-avatar-upload-container">
+                                    <input type="file" id="persona-avatar-file" accept="image/*" class="avatar-file-input">
+                                    <div class="avatar-preview" id="persona-avatar-preview">
+                                        <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                            <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+                                            <polyline points="17 8 12 3 7 8"/>
+                                            <line x1="12" y1="3" x2="12" y2="15"/>
+                                        </svg>
+                                        <span>Upload</span>
+                                    </div>
+                                    <button type="button" class="avatar-remove-btn" id="persona-avatar-remove-btn" style="display:none" title="Hapus avatar">✕</button>
+                                </div>
+                                <input type="hidden" id="persona-avatar">
+                                <button type="button" class="avatar-pinterest-toggle" id="persona-pinterest-toggle" title="Cari dari Pinterest">🔎 Cari</button>
+                            </div>
+                            <div class="form-group flex-1">
+                                <label for="persona-name">📛 Nama (Name)</label>
+                                <input type="text" id="persona-name" placeholder="Nama atau panggilan..." class="form-input">
+                                <span class="form-hint">Dapat berupa huruf atau angka</span>
+                            </div>
+                        </div>
+
+                        <div class="form-group pinterest-panel" id="persona-pinterest-panel" style="display:none">
+                            <label>🔎 Cari Avatar dari Pinterest</label>
+                            <div class="pinterest-search-row">
+                                <input type="text" id="persona-pinterest-query" class="form-input" placeholder="Kata kunci pencarian avatar...">
+                                <button type="button" class="btn-secondary" id="persona-pinterest-search-btn">Cari</button>
+                            </div>
+                            <div class="pinterest-results" id="persona-pinterest-results" style="display:none">
+                                <div class="pinterest-thumb-wrap">
+                                    <img id="persona-pinterest-thumb" class="pinterest-thumb" alt="Preview">
+                                </div>
+                                <div class="pinterest-nav">
+                                    <button type="button" class="btn-icon" id="persona-pinterest-prev-btn" title="Sebelumnya">‹</button>
+                                    <span class="pinterest-counter" id="persona-pinterest-counter">1 / 1</span>
+                                    <button type="button" class="btn-icon" id="persona-pinterest-next-btn" title="Selanjutnya">›</button>
+                                </div>
+                                <button type="button" class="btn-primary pinterest-use-btn" id="persona-pinterest-use-btn">Gunakan Gambar Ini</button>
+                            </div>
+                            <span class="form-hint" id="persona-pinterest-status"></span>
                         </div>
 
                         <div class="form-row-2">
