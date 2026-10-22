@@ -20,10 +20,14 @@ const PORT = process.env.PORT || 3000;
 const DATA_DIR = path.join(__dirname, 'data');
 const CHARACTERS_DIR = path.join(DATA_DIR, 'characters');
 const CHATS_DIR = path.join(DATA_DIR, 'chats');
+const PRIVATE_CHATS_DIR = path.join(CHATS_DIR, 'private');
+const GROUP_CHATS_DIR = path.join(CHATS_DIR, 'groups');
 const MEMORY_DIR = path.join(DATA_DIR, 'memory');
+const PRIVATE_MEMORY_DIR = path.join(MEMORY_DIR, 'private');
+const GROUP_MEMORY_DIR = path.join(MEMORY_DIR, 'groups');
 const PERSONA_DIR = path.join(DATA_DIR, 'persona');
 
-[DATA_DIR, CHARACTERS_DIR, CHATS_DIR, MEMORY_DIR, PERSONA_DIR].forEach(dir => {
+[DATA_DIR, CHARACTERS_DIR, CHATS_DIR, PRIVATE_CHATS_DIR, GROUP_CHATS_DIR, MEMORY_DIR, PRIVATE_MEMORY_DIR, GROUP_MEMORY_DIR, PERSONA_DIR].forEach(dir => {
     if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
 });
 
@@ -41,6 +45,16 @@ function safePath(baseDir, id) {
     if (typeof id !== 'string' || !ID_RE.test(id)) return null;
     const resolvedBase = path.resolve(baseDir) + path.sep;
     const resolved = path.resolve(baseDir, `${id}.json`);
+    if (!resolved.startsWith(resolvedBase)) return null;
+    return resolved;
+}
+
+function safeGroupChatPath(groupId, chatId) {
+    if (typeof groupId !== 'string' || !ID_RE.test(groupId)) return null;
+    if (typeof chatId !== 'string' || !ID_RE.test(chatId)) return null;
+    const groupDir = path.resolve(GROUP_CHATS_DIR, groupId);
+    const resolvedBase = groupDir + path.sep;
+    const resolved = path.resolve(groupDir, `${chatId}.json`);
     if (!resolved.startsWith(resolvedBase)) return null;
     return resolved;
 }
@@ -273,7 +287,7 @@ app.post('/api/characters', (req, res) => {
     writeJSON(path.join(CHARACTERS_DIR, `${id}.json`), char);
 
     // Initialize memory for this character
-    writeJSON(path.join(MEMORY_DIR, `${id}.json`), {
+    writeJSON(path.join(PRIVATE_MEMORY_DIR, `${id}.json`), {
         characterId: id,
         facts: [],
         summaries: [],
@@ -312,31 +326,31 @@ app.put('/api/characters/:id', (req, res) => {
 
 app.delete('/api/characters/:id', (req, res) => {
     const fp = safePath(CHARACTERS_DIR, req.params.id);
-    const memFp = safePath(MEMORY_DIR, req.params.id);
+    const memFp = safePath(PRIVATE_MEMORY_DIR, req.params.id);
     if (!fp || !memFp) return res.status(400).json({ error: 'Invalid character id' });
     if (fs.existsSync(fp)) fs.unlinkSync(fp);
     // Also delete associated memory
     if (fs.existsSync(memFp)) fs.unlinkSync(memFp);
     // Delete all chats for this character
-    const chatFiles = fs.readdirSync(CHATS_DIR).filter(f => f.endsWith('.json'));
+    const chatFiles = fs.readdirSync(PRIVATE_CHATS_DIR).filter(f => f.endsWith('.json'));
     chatFiles.forEach(f => {
-        const chat = readJSON(path.join(CHATS_DIR, f));
+        const chat = readJSON(path.join(PRIVATE_CHATS_DIR, f));
         if (chat && chat.characterId === req.params.id) {
-            fs.unlinkSync(path.join(CHATS_DIR, f));
+            fs.unlinkSync(path.join(PRIVATE_CHATS_DIR, f));
         }
     });
     res.json({ ok: true });
 });
 
 // ══════════════════════════════════════════════════════════════
-//  CHAT HISTORY API
+//  CHAT HISTORY API (PRIVATE)
 // ══════════════════════════════════════════════════════════════
 
 // List all chats for a character
 app.get('/api/chats/:characterId', (req, res) => {
-    const files = fs.readdirSync(CHATS_DIR).filter(f => f.endsWith('.json'));
+    const files = fs.readdirSync(PRIVATE_CHATS_DIR).filter(f => f.endsWith('.json'));
     const chats = files
-        .map(f => readJSON(path.join(CHATS_DIR, f)))
+        .map(f => readJSON(path.join(PRIVATE_CHATS_DIR, f)))
         .filter(c => c && c.characterId === req.params.characterId)
         .map(c => ({
             id: c.id,
@@ -352,7 +366,7 @@ app.get('/api/chats/:characterId', (req, res) => {
 
 // Get full chat
 app.get('/api/chat/:chatId', (req, res) => {
-    const fp = safePath(CHATS_DIR, req.params.chatId);
+    const fp = safePath(PRIVATE_CHATS_DIR, req.params.chatId);
     if (!fp) return res.status(400).json({ error: 'Invalid chat id' });
     const chat = readJSON(fp);
     if (!chat) return res.status(404).json({ error: 'Chat not found' });
@@ -371,13 +385,13 @@ app.post('/api/chats', (req, res) => {
         createdAt: now,
         updatedAt: now
     };
-    writeJSON(path.join(CHATS_DIR, `${id}.json`), chat);
+    writeJSON(path.join(PRIVATE_CHATS_DIR, `${id}.json`), chat);
     res.json(chat);
 });
 
 // Update chat (add messages, rename, etc.)
 app.put('/api/chat/:chatId', (req, res) => {
-    const fp = safePath(CHATS_DIR, req.params.chatId);
+    const fp = safePath(PRIVATE_CHATS_DIR, req.params.chatId);
     if (!fp) return res.status(400).json({ error: 'Invalid chat id' });
     const existing = readJSON(fp);
     if (!existing) return res.status(404).json({ error: 'Not found' });
@@ -398,10 +412,318 @@ app.put('/api/chat/:chatId', (req, res) => {
 
 // Delete chat
 app.delete('/api/chat/:chatId', (req, res) => {
-    const fp = safePath(CHATS_DIR, req.params.chatId);
+    const fp = safePath(PRIVATE_CHATS_DIR, req.params.chatId);
     if (!fp) return res.status(400).json({ error: 'Invalid chat id' });
     if (fs.existsSync(fp)) fs.unlinkSync(fp);
     res.json({ ok: true });
+});
+
+// ══════════════════════════════════════════════════════════════
+//  GROUP CHAT CRUD API
+// ══════════════════════════════════════════════════════════════
+
+// List all groups
+app.get('/api/groups', (req, res) => {
+    try {
+        const files = fs.readdirSync(GROUP_CHATS_DIR).filter(f => f.endsWith('.json'));
+        const groups = files
+            .map(f => readJSON(path.join(GROUP_CHATS_DIR, f)))
+            .filter(Boolean)
+            .map(g => ({
+                id: g.id,
+                name: g.name || 'Untitled Group',
+                avatar: g.avatar || '',
+                scenario: g.scenario || '',
+                characterIds: Array.isArray(g.characterIds) ? g.characterIds : [],
+                activePersonaId: g.activePersonaId || null,
+                messageCount: (g.messages || []).length,
+                createdAt: g.createdAt,
+                updatedAt: g.updatedAt
+            }));
+        groups.sort((a, b) => (b.updatedAt || '').localeCompare(a.updatedAt || ''));
+        res.json(groups);
+    } catch (err) {
+        console.error('Error listing groups:', err);
+        res.status(500).json({ error: 'Failed to list groups' });
+    }
+});
+
+// Get single group
+app.get('/api/groups/:id', (req, res) => {
+    const fp = safePath(GROUP_CHATS_DIR, req.params.id);
+    if (!fp) return res.status(400).json({ error: 'Invalid group id' });
+    const group = readJSON(fp);
+    if (!group) return res.status(404).json({ error: 'Group not found' });
+    res.json(group);
+});
+
+// Create new group
+app.post('/api/groups', (req, res) => {
+    const { name, avatar, scenario, characterIds, activePersonaId } = req.body;
+    if (!name || typeof name !== 'string' || !name.trim()) {
+        return res.status(400).json({ error: 'Group name is required' });
+    }
+    if (!Array.isArray(characterIds) || characterIds.length === 0) {
+        return res.status(400).json({ error: 'Group must have at least one character' });
+    }
+
+    const id = uuidv4();
+    const now = new Date().toISOString();
+    const group = {
+        id,
+        name: name.trim(),
+        avatar: avatar || '',
+        scenario: scenario || '',
+        characterIds: characterIds,
+        activePersonaId: activePersonaId || null,
+        messages: [],
+        createdAt: now,
+        updatedAt: now
+    };
+    writeJSON(path.join(GROUP_CHATS_DIR, `${id}.json`), group);
+
+    // Initialize group session directory and first session
+    const sessionDir = path.join(GROUP_CHATS_DIR, id);
+    if (!fs.existsSync(sessionDir)) fs.mkdirSync(sessionDir, { recursive: true });
+    const firstChatId = uuidv4();
+    const firstChat = {
+        id: firstChatId,
+        groupId: id,
+        title: 'New Chat',
+        messages: [],
+        createdAt: now,
+        updatedAt: now
+    };
+    writeJSON(path.join(sessionDir, `${firstChatId}.json`), firstChat);
+
+    // Also initialize group memory in GROUP_MEMORY_DIR
+    const memFp = path.join(GROUP_MEMORY_DIR, `${id}.json`);
+    writeJSON(memFp, {
+        groupId: id,
+        facts: [],
+        summaries: [],
+        importantEvents: [],
+        personaId: activePersonaId || '1',
+        lastUpdated: now
+    });
+
+    res.json(group);
+});
+
+// Update group
+app.put('/api/groups/:id', (req, res) => {
+    const fp = safePath(GROUP_CHATS_DIR, req.params.id);
+    if (!fp) return res.status(400).json({ error: 'Invalid group id' });
+    const existing = readJSON(fp);
+    if (!existing) return res.status(404).json({ error: 'Group not found' });
+
+    const updated = {
+        ...existing,
+        name: typeof req.body.name === 'string' && req.body.name.trim() ? req.body.name.trim() : existing.name,
+        avatar: req.body.avatar !== undefined ? req.body.avatar : existing.avatar,
+        scenario: req.body.scenario !== undefined ? req.body.scenario : existing.scenario,
+        characterIds: Array.isArray(req.body.characterIds) ? req.body.characterIds : existing.characterIds,
+        activePersonaId: req.body.activePersonaId !== undefined ? req.body.activePersonaId : existing.activePersonaId,
+        messages: Array.isArray(req.body.messages) ? req.body.messages : existing.messages,
+        updatedAt: new Date().toISOString()
+    };
+    writeJSON(fp, updated);
+    res.json(updated);
+});
+
+// Delete group
+app.delete('/api/groups/:id', (req, res) => {
+    const fp = safePath(GROUP_CHATS_DIR, req.params.id);
+    const memFp = safePath(GROUP_MEMORY_DIR, req.params.id);
+    if (!fp) return res.status(400).json({ error: 'Invalid group id' });
+    if (fs.existsSync(fp)) fs.unlinkSync(fp);
+    if (memFp && fs.existsSync(memFp)) fs.unlinkSync(memFp);
+
+    // Delete session directory
+    const sessionDir = path.join(GROUP_CHATS_DIR, req.params.id);
+    if (fs.existsSync(sessionDir)) {
+        try { fs.rmSync(sessionDir, { recursive: true, force: true }); } catch { }
+    }
+    res.json({ ok: true });
+});
+
+// ── GROUP CHAT SESSIONS API ────────────────────────────────────
+
+// List all chat sessions for a group
+app.get('/api/groups/:groupId/chats', (req, res) => {
+    const groupId = req.params.groupId;
+    const groupFp = safePath(GROUP_CHATS_DIR, groupId);
+    if (!groupFp || !fs.existsSync(groupFp)) return res.status(404).json({ error: 'Group not found' });
+
+    const sessionDir = path.join(GROUP_CHATS_DIR, groupId);
+    if (!fs.existsSync(sessionDir)) fs.mkdirSync(sessionDir, { recursive: true });
+
+    let files = fs.readdirSync(sessionDir).filter(f => f.endsWith('.json'));
+    // If no session exists yet, initialize first session from existing group.messages if any
+    if (files.length === 0) {
+        const group = readJSON(groupFp);
+        const firstChatId = uuidv4();
+        const now = new Date().toISOString();
+        const firstChat = {
+            id: firstChatId,
+            groupId,
+            title: 'New Chat',
+            messages: (group && Array.isArray(group.messages)) ? group.messages : [],
+            createdAt: (group && group.createdAt) || now,
+            updatedAt: (group && group.updatedAt) || now
+        };
+        writeJSON(path.join(sessionDir, `${firstChatId}.json`), firstChat);
+        files = [`${firstChatId}.json`];
+    }
+
+    const chats = files
+        .map(f => readJSON(path.join(sessionDir, f)))
+        .filter(Boolean)
+        .map(c => ({
+            id: c.id,
+            groupId: c.groupId || groupId,
+            title: c.title || 'Untitled Chat',
+            messageCount: (c.messages || []).length,
+            createdAt: c.createdAt,
+            updatedAt: c.updatedAt
+        }));
+    chats.sort((a, b) => (b.updatedAt || '').localeCompare(a.updatedAt || ''));
+    res.json(chats);
+});
+
+// Create new chat session for a group
+app.post('/api/groups/:groupId/chats', (req, res) => {
+    const groupId = req.params.groupId;
+    const groupFp = safePath(GROUP_CHATS_DIR, groupId);
+    if (!groupFp || !fs.existsSync(groupFp)) return res.status(404).json({ error: 'Group not found' });
+
+    const sessionDir = path.join(GROUP_CHATS_DIR, groupId);
+    if (!fs.existsSync(sessionDir)) fs.mkdirSync(sessionDir, { recursive: true });
+
+    const id = uuidv4();
+    const now = new Date().toISOString();
+    const newChat = {
+        id,
+        groupId,
+        title: (typeof req.body.title === 'string' && req.body.title.trim()) ? req.body.title.trim() : 'New Chat',
+        messages: [],
+        createdAt: now,
+        updatedAt: now
+    };
+    writeJSON(path.join(sessionDir, `${id}.json`), newChat);
+    res.json(newChat);
+});
+
+// Get single group chat session
+app.get('/api/groups/:groupId/chat/:chatId', (req, res) => {
+    const fp = safeGroupChatPath(req.params.groupId, req.params.chatId);
+    if (!fp) return res.status(400).json({ error: 'Invalid group or chat id' });
+    const chat = readJSON(fp);
+    if (!chat) return res.status(404).json({ error: 'Chat session not found' });
+    res.json(chat);
+});
+
+// Rename group chat session
+app.put('/api/groups/:groupId/chat/:chatId', (req, res) => {
+    const fp = safeGroupChatPath(req.params.groupId, req.params.chatId);
+    if (!fp) return res.status(400).json({ error: 'Invalid group or chat id' });
+    const chat = readJSON(fp);
+    if (!chat) return res.status(404).json({ error: 'Chat session not found' });
+
+    if (typeof req.body.title === 'string' && req.body.title.trim()) {
+        chat.title = req.body.title.trim();
+        chat.updatedAt = new Date().toISOString();
+        writeJSON(fp, chat);
+    }
+    res.json(chat);
+});
+
+// Delete group chat session
+app.delete('/api/groups/:groupId/chat/:chatId', (req, res) => {
+    const fp = safeGroupChatPath(req.params.groupId, req.params.chatId);
+    if (!fp) return res.status(400).json({ error: 'Invalid group or chat id' });
+    if (fs.existsSync(fp)) fs.unlinkSync(fp);
+    res.json({ ok: true });
+});
+
+// Edit message in group chat session
+app.put('/api/groups/:groupId/chat/:chatId/message', (req, res) => {
+    const messageIndex = Number(req.body.messageIndex);
+    const { content } = req.body;
+    const fp = safeGroupChatPath(req.params.groupId, req.params.chatId);
+    if (!fp) return res.status(400).json({ error: 'Invalid group or chat id' });
+    if (typeof content !== 'string') return res.status(400).json({ error: 'Content must be string' });
+
+    const chat = readJSON(fp);
+    if (!chat || !Array.isArray(chat.messages) || !Number.isInteger(messageIndex) || !chat.messages[messageIndex]) {
+        return res.status(404).json({ error: 'Chat or message not found' });
+    }
+
+    chat.messages[messageIndex].content = content;
+    if (chat.messages[messageIndex].alternates) {
+        delete chat.messages[messageIndex].alternates;
+        delete chat.messages[messageIndex].selectedAlternate;
+    }
+    chat.updatedAt = new Date().toISOString();
+    writeJSON(fp, chat);
+    res.json({ ok: true });
+});
+
+// Delete message in group chat session
+app.delete('/api/groups/:groupId/chat/:chatId/message/:index', (req, res) => {
+    const messageIndex = Number(req.params.index);
+    const fp = safeGroupChatPath(req.params.groupId, req.params.chatId);
+    if (!fp) return res.status(400).json({ error: 'Invalid group or chat id' });
+
+    const chat = readJSON(fp);
+    if (!chat || !Array.isArray(chat.messages) || !Number.isInteger(messageIndex) || messageIndex < 0 || messageIndex >= chat.messages.length) {
+        return res.status(404).json({ error: 'Message not found' });
+    }
+
+    chat.messages.splice(messageIndex, 1);
+    chat.updatedAt = new Date().toISOString();
+    writeJSON(fp, chat);
+    res.json({ ok: true, remaining: chat.messages.length });
+});
+
+// Edit message in group (legacy backwards-compatibility)
+app.put('/api/groups/:groupId/message', (req, res) => {
+    const messageIndex = Number(req.body.messageIndex);
+    const { content } = req.body;
+    const fp = safePath(GROUP_CHATS_DIR, req.params.groupId);
+    if (!fp) return res.status(400).json({ error: 'Invalid group id' });
+    if (typeof content !== 'string') return res.status(400).json({ error: 'Content must be string' });
+
+    const group = readJSON(fp);
+    if (!group || !Array.isArray(group.messages) || !Number.isInteger(messageIndex) || !group.messages[messageIndex]) {
+        return res.status(404).json({ error: 'Group or message not found' });
+    }
+
+    group.messages[messageIndex].content = content;
+    if (group.messages[messageIndex].alternates) {
+        delete group.messages[messageIndex].alternates;
+        delete group.messages[messageIndex].selectedAlternate;
+    }
+    group.updatedAt = new Date().toISOString();
+    writeJSON(fp, group);
+    res.json({ ok: true });
+});
+
+// Delete message in group (legacy backwards-compatibility)
+app.delete('/api/groups/:groupId/message/:index', (req, res) => {
+    const messageIndex = Number(req.params.index);
+    const fp = safePath(GROUP_CHATS_DIR, req.params.groupId);
+    if (!fp) return res.status(400).json({ error: 'Invalid group id' });
+
+    const group = readJSON(fp);
+    if (!group || !Array.isArray(group.messages) || !Number.isInteger(messageIndex) || messageIndex < 0 || messageIndex >= group.messages.length) {
+        return res.status(404).json({ error: 'Message not found' });
+    }
+
+    group.messages.splice(messageIndex, 1);
+    group.updatedAt = new Date().toISOString();
+    writeJSON(fp, group);
+    res.json({ ok: true, remaining: group.messages.length });
 });
 
 // ══════════════════════════════════════════════════════════════
@@ -643,7 +965,7 @@ app.delete('/api/personas/:id', (req, res) => {
 // ══════════════════════════════════════════════════════════════
 
 app.get('/api/memory/:characterId', (req, res) => {
-    const fp = safePath(MEMORY_DIR, req.params.characterId);
+    const fp = safePath(PRIVATE_MEMORY_DIR, req.params.characterId);
     if (!fp) return res.status(400).json({ error: 'Invalid character id' });
     const mem = readJSON(fp, {
         characterId: req.params.characterId,
@@ -658,7 +980,7 @@ app.get('/api/memory/:characterId', (req, res) => {
 });
 
 app.put('/api/memory/:characterId', (req, res) => {
-    const fp = safePath(MEMORY_DIR, req.params.characterId);
+    const fp = safePath(PRIVATE_MEMORY_DIR, req.params.characterId);
     if (!fp) return res.status(400).json({ error: 'Invalid character id' });
     const existing = readJSON(fp, { characterId: req.params.characterId, facts: [], summaries: [], importantEvents: [], personaId: '1' });
     const updated = {
@@ -671,6 +993,57 @@ app.put('/api/memory/:characterId', (req, res) => {
     };
     delete updated.userPreferences;
     writeJSON(fp, updated);
+    res.json(updated);
+});
+
+// Group Memory API
+app.get('/api/groups/:groupId/memory', (req, res) => {
+    const fp = safePath(GROUP_MEMORY_DIR, req.params.groupId);
+    const groupFp = safePath(GROUP_CHATS_DIR, req.params.groupId);
+    if (!fp || !groupFp) return res.status(400).json({ error: 'Invalid group id' });
+    const group = readJSON(groupFp);
+    const mem = readJSON(fp, {
+        groupId: req.params.groupId,
+        facts: [],
+        summaries: [],
+        importantEvents: [],
+        personaId: (group && group.activePersonaId) ? group.activePersonaId : '1',
+        lastUpdated: new Date().toISOString()
+    });
+    if (!mem.personaId) mem.personaId = (group && group.activePersonaId) ? group.activePersonaId : '1';
+    res.json(mem);
+});
+
+app.put('/api/groups/:groupId/memory', (req, res) => {
+    const fp = safePath(GROUP_MEMORY_DIR, req.params.groupId);
+    const groupFp = safePath(GROUP_CHATS_DIR, req.params.groupId);
+    if (!fp || !groupFp) return res.status(400).json({ error: 'Invalid group id' });
+    const existing = readJSON(fp, {
+        groupId: req.params.groupId,
+        facts: [],
+        summaries: [],
+        importantEvents: [],
+        personaId: '1'
+    });
+
+    const updated = {
+        ...existing,
+        facts: Array.isArray(req.body.facts) ? req.body.facts : existing.facts,
+        summaries: Array.isArray(req.body.summaries) ? req.body.summaries : existing.summaries,
+        importantEvents: (req.body.importantEvents ?? existing.importantEvents ?? []).filter(e => e && typeof e === 'object'),
+        personaId: req.body.personaId || existing.personaId || '1',
+        lastUpdated: new Date().toISOString()
+    };
+    writeJSON(fp, updated);
+
+    // Sync activePersonaId to group file
+    const group = readJSON(groupFp);
+    if (group) {
+        group.activePersonaId = updated.personaId;
+        group.updatedAt = new Date().toISOString();
+        writeJSON(groupFp, group);
+    }
+
     res.json(updated);
 });
 
@@ -764,8 +1137,8 @@ app.post('/api/chat/send', async (req, res) => {
     }
 
     const charFp = safePath(CHARACTERS_DIR, characterId);
-    const memFp = safePath(MEMORY_DIR, characterId);
-    const chatFp = safePath(CHATS_DIR, chatId);
+    const memFp = safePath(PRIVATE_MEMORY_DIR, characterId);
+    const chatFp = safePath(PRIVATE_CHATS_DIR, chatId);
     if (!charFp || !memFp || !chatFp) {
         return res.status(400).json({ error: 'Invalid characterId or chatId' });
     }
@@ -954,8 +1327,8 @@ app.post('/api/chat/regenerate', async (req, res) => {
     }
 
     const charFp = safePath(CHARACTERS_DIR, characterId);
-    const memFp = safePath(MEMORY_DIR, characterId);
-    const chatFp = safePath(CHATS_DIR, chatId);
+    const memFp = safePath(PRIVATE_MEMORY_DIR, characterId);
+    const chatFp = safePath(PRIVATE_CHATS_DIR, chatId);
     if (!charFp || !memFp || !chatFp) {
         return res.status(400).json({ error: 'Invalid characterId or chatId' });
     }
@@ -1062,7 +1435,7 @@ app.post('/api/chat/regenerate', async (req, res) => {
 app.put('/api/chat/:chatId/alternate', (req, res) => {
     const messageIndex = Number(req.body.messageIndex);
     const { selectedAlternate } = req.body;
-    const fp = safePath(CHATS_DIR, req.params.chatId);
+    const fp = safePath(PRIVATE_CHATS_DIR, req.params.chatId);
     if (!fp) return res.status(400).json({ error: 'Invalid chat id' });
     const chat = readJSON(fp);
     if (!chat || !Array.isArray(chat.messages) || !Number.isInteger(messageIndex) ||
@@ -1085,7 +1458,7 @@ app.put('/api/chat/:chatId/alternate', (req, res) => {
 app.put('/api/chat/:chatId/message', (req, res) => {
     const messageIndex = Number(req.body.messageIndex);
     const { content } = req.body;
-    const fp = safePath(CHATS_DIR, req.params.chatId);
+    const fp = safePath(PRIVATE_CHATS_DIR, req.params.chatId);
     if (!fp) return res.status(400).json({ error: 'Invalid chat id' });
     if (typeof content !== 'string') {
         return res.status(400).json({ error: 'content must be a string' });
@@ -1118,7 +1491,7 @@ app.put('/api/chat/:chatId/message', (req, res) => {
 
 app.delete('/api/chat/:chatId/message/:index', (req, res) => {
     const messageIndex = Number(req.params.index);
-    const fp = safePath(CHATS_DIR, req.params.chatId);
+    const fp = safePath(PRIVATE_CHATS_DIR, req.params.chatId);
     if (!fp) return res.status(400).json({ error: 'Invalid chat id' });
 
     const chat = readJSON(fp);
@@ -1198,7 +1571,7 @@ function autoExtractMemory(fp, userMsg, assistantMsg) {
 // ══════════════════════════════════════════════════════════════
 
 app.post('/api/memory/:characterId/summarize', async (req, res) => {
-    const { chatId } = req.body;
+    const { chatId, isGroup } = req.body;
     const characterId = req.params.characterId;
 
     const baseUrl = process.env.BASE_URL;
@@ -1209,34 +1582,49 @@ app.post('/api/memory/:characterId/summarize', async (req, res) => {
         return res.status(400).json({ error: 'Configure BASE_URL first' });
     }
 
-    const chatFp = safePath(CHATS_DIR, chatId);
-    const memFp = safePath(MEMORY_DIR, characterId);
-    if (!chatFp || !memFp) {
-        return res.status(400).json({ error: 'Invalid characterId or chatId' });
+    let chat = null;
+    let memFp = null;
+
+    if (isGroup) {
+        memFp = safePath(GROUP_MEMORY_DIR, characterId);
+        const groupChatFp = safeGroupChatPath(characterId, chatId);
+        if (groupChatFp && fs.existsSync(groupChatFp)) {
+            chat = readJSON(groupChatFp);
+        } else {
+            // Fallback: check legacy group file
+            const legacyFp = safePath(GROUP_CHATS_DIR, characterId);
+            if (legacyFp && fs.existsSync(legacyFp)) {
+                chat = readJSON(legacyFp);
+            }
+        }
+    } else {
+        memFp = safePath(PRIVATE_MEMORY_DIR, characterId);
+        const chatFp = safePath(PRIVATE_CHATS_DIR, chatId);
+        if (chatFp && fs.existsSync(chatFp)) {
+            chat = readJSON(chatFp);
+        }
+        if (chat && chat.characterId !== characterId) {
+            return res.status(400).json({ error: 'This chat does not belong to the given character' });
+        }
     }
 
-    // Load chat
-    const chat = readJSON(chatFp);
-    if (!chat || !Array.isArray(chat.messages) || chat.messages.length < 4) {
-        return res.status(400).json({ error: 'Not enough messages to summarize' });
+    if (!chat || !memFp) {
+        return res.status(400).json({ error: 'Invalid ID or chat session not found' });
     }
-    if (chat.characterId !== characterId) {
-        return res.status(400).json({ error: 'This chat does not belong to the given character' });
+
+    if (!Array.isArray(chat.messages) || chat.messages.length < 2) {
+        return res.status(400).json({ error: 'Not enough messages to summarize' });
     }
 
     // Ask LLM to extract memory
     // NOTE: only send the most recent messages. Sending the entire chat history
-    // (potentially hundreds of turns) can exceed the model's context window
-    // (see NUM_CTX in Collab-Llama.py / Kaggle-Llama.py — llama-server has no
-    // implicit fallback the way Ollama did). When that happens the upstream
-    // server may silently truncate the prompt or return an empty/garbled
-    // completion instead of an HTTP error, which is what produced "null-ish"
-    // results here.
+    // (potentially hundreds of turns) can exceed the model's context window.
     const MAX_SUMMARIZE_MESSAGES = 40;
     const messagesForSummary = chat.messages.slice(-MAX_SUMMARIZE_MESSAGES);
-    const conversationText = messagesForSummary.map(m =>
-        `${m.role === 'user' ? 'User' : 'Character'}: ${m.content}`
-    ).join('\n');
+    const conversationText = messagesForSummary.map(m => {
+        const sender = m.senderName || (m.role === 'user' ? 'User' : 'Character');
+        return `${sender}: ${m.content}`;
+    }).join('\n');
 
     try {
         const endpoint = `${baseUrl.replace(/\/$/, '')}/v1/chat/completions`;
@@ -1387,6 +1775,437 @@ If there are no facts or events worth noting, write "- none" under that label in
         console.error('Summarize error:', err);
         res.status(500).json({ error: err.message });
     }
+});
+
+// ══════════════════════════════════════════════════════════════
+//  GROUP CHAT COMPLETION LOGIC (Perspective-Aware)
+// ══════════════════════════════════════════════════════════════
+
+function resolveGroupSession(groupId, chatId) {
+    const sessionDir = path.join(GROUP_CHATS_DIR, groupId);
+    if (!fs.existsSync(sessionDir)) fs.mkdirSync(sessionDir, { recursive: true });
+
+    let activeChatId = chatId;
+    if (!activeChatId) {
+        let files = fs.readdirSync(sessionDir).filter(f => f.endsWith('.json'));
+        if (files.length > 0) {
+            files.sort().reverse();
+            activeChatId = files[0].replace('.json', '');
+        } else {
+            activeChatId = uuidv4();
+            const now = new Date().toISOString();
+            writeJSON(path.join(sessionDir, `${activeChatId}.json`), {
+                id: activeChatId,
+                groupId,
+                title: 'New Chat',
+                messages: [],
+                createdAt: now,
+                updatedAt: now
+            });
+        }
+    }
+
+    const chatFp = safeGroupChatPath(groupId, activeChatId);
+    if (!chatFp) return null;
+    const chat = readJSON(chatFp, {
+        id: activeChatId,
+        groupId,
+        title: 'New Chat',
+        messages: [],
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString()
+    });
+    if (!Array.isArray(chat.messages)) chat.messages = [];
+    return { chatFp, chat, activeChatId };
+}
+
+async function callGroupCharacterLLM({ group, messages, targetCharacterId, memFp, userPromptContext = '' }) {
+    const baseUrl = process.env.BASE_URL;
+    const apiKey = process.env.API_KEY || 'sk-colab-local';
+    const modelName = process.env.MODEL_NAME || 'character1';
+
+    if (!baseUrl || baseUrl.includes('your-colab-url')) {
+        throw new Error('Please configure your Colab BASE_URL in Settings first.');
+    }
+
+    const charFp = safePath(CHARACTERS_DIR, targetCharacterId);
+    const char = charFp ? readJSON(charFp) : null;
+    if (!char) throw new Error('Target character not found');
+
+    const memory = readJSON(memFp, { facts: [], summaries: [], importantEvents: [] });
+    const groupMemFp = safePath(GROUP_MEMORY_DIR, group.id);
+    const groupMemory = groupMemFp ? readJSON(groupMemFp, { facts: [], summaries: [], importantEvents: [] }) : null;
+
+    // Identify user persona name
+    let userName = 'User';
+    const personas = getPersonas();
+    const effectivePersonaId = (groupMemory && groupMemory.personaId) || group.activePersonaId || memory.personaId;
+    if (effectivePersonaId) {
+        const found = personas.find(p => String(p.id) === String(effectivePersonaId));
+        if (found && found.name) userName = found.name;
+    } else if (personas[0] && personas[0].name) {
+        userName = personas[0].name;
+    }
+
+    // Load other member info for context
+    const otherMembers = (group.characterIds || [])
+        .filter(cid => cid !== targetCharacterId)
+        .map(cid => {
+            const cFp = safePath(CHARACTERS_DIR, cid);
+            const c = cFp ? readJSON(cFp) : null;
+            if (!c) return null;
+            return {
+                name: c.name,
+                desc: (c.personality || '').substring(0, 150)
+            };
+        }).filter(Boolean);
+
+    // ── Build system prompt ──
+    let systemParts = [];
+    let genderStr = char.gender ? ` You are a ${char.gender}.` : '';
+    let ageStr = char.age ? ` You are ${char.age} years old.` : '';
+    systemParts.push(`You are ${char.name}.${genderStr}${ageStr} You must stay in character at all times.`);
+
+    if (char.personality) {
+        systemParts.push(`\n## Personality & Description\n${char.personality}`);
+    }
+    if (char.systemPrompt) {
+        systemParts.push(`\n## Additional Instructions\n${char.systemPrompt}`);
+    }
+    if (char.exampleDialogue) {
+        systemParts.push(`\n## Example Dialogue Style\n${char.exampleDialogue}`);
+    }
+
+    // Group context
+    systemParts.push(`\n## Group Chat Setting`);
+    systemParts.push(`You are taking part in a group chat named "${group.name}".`);
+    if (group.scenario) {
+        systemParts.push(`Current Scene / Location:\n${group.scenario}`);
+    }
+    systemParts.push(`Participants in this room:`);
+    systemParts.push(`- ${userName} (The User)`);
+    systemParts.push(`- ${char.name} (YOU)`);
+    otherMembers.forEach(m => {
+        systemParts.push(`- ${m.name}${m.desc ? `: ${m.desc}` : ''}`);
+    });
+
+    if (groupMemory && groupMemory.facts && groupMemory.facts.length > 0) {
+        systemParts.push(`\n## Shared Group Facts\n${groupMemory.facts.map(f => `- ${f}`).join('\n')}`);
+    }
+    if (memory.facts && memory.facts.length > 0) {
+        systemParts.push(`\n## Important Facts You Remember\n${memory.facts.map(f => `- ${f}`).join('\n')}`);
+    }
+    const personaPrompt = formatPersonaPrompt(effectivePersonaId);
+    if (personaPrompt) {
+        systemParts.push(personaPrompt);
+    }
+
+    systemParts.push(`\n## Group Chat Roleplay Rules
+1. Stay fully in character as ${char.name}. Never break character, and never refer to yourself as an AI or language model.
+2. Only speak and act as ${char.name}. NEVER generate dialogue or narration on behalf of ${userName} or any other character. Only produce your own response.
+3. React naturally to what the others have said, speaking to ${userName} or addressing other characters by name as appropriate.
+4. Keep responses punchy and concise (1-2 short paragraphs, 3-6 sentences total).
+5. Do NOT prefix your output with "${char.name}:" or "[${char.name}]:" — speak directly in first-person.`);
+
+    const systemMessage = systemParts.join('\n');
+
+    // ── Build perspective-aware message history ──
+    const promptMessages = [{ role: 'system', content: systemMessage }];
+    const recent = (messages || group.messages || []).slice(-30);
+    recent.forEach(m => {
+        const content = (m.alternates && m.selectedAlternate !== undefined)
+            ? (m.alternates[m.selectedAlternate] || m.content)
+            : m.content;
+        if (m.senderId === targetCharacterId) {
+            promptMessages.push({ role: 'assistant', content });
+        } else {
+            const senderTag = m.senderName || (m.senderType === 'user' ? userName : 'Someone');
+            promptMessages.push({ role: 'user', content: `[${senderTag}]: ${content}` });
+        }
+    });
+
+    // Call llama.cpp API
+    const endpoint = `${baseUrl.replace(/\/$/, '')}/v1/chat/completions`;
+    console.log(`📤 Sending Group LLM request to ${endpoint} for ${char.name} in group "${group.name}" (${promptMessages.length} msgs)`);
+
+    const response = await fetchWithRetry(endpoint, {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${apiKey}`
+        },
+        body: JSON.stringify({
+            model: modelName,
+            messages: promptMessages,
+            ...getModelParams()
+        })
+    }, 2);
+
+    if (!response.ok) {
+        const errText = await response.text();
+        const cleanError = parseErrorResponse(response.status, errText);
+        throw new Error(cleanError);
+    }
+
+    const data = await response.json();
+    const rawContent = data.choices?.[0]?.message?.content || '...';
+    let assistantContent = cleanAssistantResponse(rawContent);
+
+    // Strip leading name prefix if hallucinated
+    const prefixRegex = new RegExp(`^(\\[?${char.name}\\]?:?\\s*)+`, 'i');
+    assistantContent = assistantContent.replace(prefixRegex, '').trim();
+
+    // Auto extract memory for this character and group
+    autoExtractMemory(memFp, userPromptContext || assistantContent, assistantContent);
+    if (groupMemFp) {
+        autoExtractMemory(groupMemFp, userPromptContext || assistantContent, assistantContent);
+    }
+
+    return {
+        character: char,
+        content: assistantContent
+    };
+}
+
+// User sends a message to group & target character responds
+app.post('/api/group-chat/send', async (req, res) => {
+    const { groupId, chatId, targetCharacterId, userMessage } = req.body;
+    if (!groupId || !targetCharacterId || !userMessage) {
+        return res.status(400).json({ error: 'Missing groupId, targetCharacterId, or userMessage' });
+    }
+    const groupFp = safePath(GROUP_CHATS_DIR, groupId);
+    const memFp = safePath(PRIVATE_MEMORY_DIR, targetCharacterId);
+    if (!groupFp || !memFp) return res.status(400).json({ error: 'Invalid id' });
+
+    const group = readJSON(groupFp);
+    if (!group) return res.status(404).json({ error: 'Group not found' });
+
+    const sessionInfo = resolveGroupSession(groupId, chatId);
+    if (!sessionInfo) return res.status(400).json({ error: 'Failed to resolve group session' });
+    const { chatFp, chat, activeChatId } = sessionInfo;
+
+    // User persona name
+    let userName = 'User';
+    const personas = getPersonas();
+    const groupMemFp = safePath(GROUP_MEMORY_DIR, groupId);
+    const groupMemory = groupMemFp ? readJSON(groupMemFp) : null;
+    const personaId = (groupMemory && groupMemory.personaId) || group.activePersonaId;
+    if (personaId) {
+        const found = personas.find(p => String(p.id) === String(personaId));
+        if (found && found.name) userName = found.name;
+    } else if (personas[0] && personas[0].name) {
+        userName = personas[0].name;
+    }
+
+    // Append user message
+    const now = new Date().toISOString();
+    const userMsgObj = {
+        id: uuidv4(),
+        senderType: 'user',
+        senderId: 'user',
+        senderName: userName,
+        content: userMessage,
+        timestamp: now
+    };
+    chat.messages.push(userMsgObj);
+
+    try {
+        const { character, content } = await callGroupCharacterLLM({
+            group,
+            messages: chat.messages,
+            targetCharacterId,
+            memFp,
+            userPromptContext: userMessage
+        });
+
+        // Fresh re-read before write
+        const freshChat = readJSON(chatFp) || chat;
+        if (!Array.isArray(freshChat.messages)) freshChat.messages = [];
+
+        if (!freshChat.messages.some(m => m.id === userMsgObj.id)) {
+            freshChat.messages.push(userMsgObj);
+        }
+
+        const replyMsg = {
+            id: uuidv4(),
+            senderType: 'character',
+            senderId: targetCharacterId,
+            senderName: character.name,
+            senderAvatar: character.avatar || '',
+            content: content,
+            timestamp: new Date().toISOString()
+        };
+        freshChat.messages.push(replyMsg);
+        freshChat.updatedAt = new Date().toISOString();
+        writeJSON(chatFp, freshChat);
+
+        // Update group updated timestamp
+        const freshGroup = readJSON(groupFp) || group;
+        freshGroup.updatedAt = new Date().toISOString();
+        writeJSON(groupFp, freshGroup);
+
+        res.json({
+            userMessage: userMsgObj,
+            replyMessage: replyMsg,
+            groupId: freshGroup.id,
+            chatId: activeChatId
+        });
+    } catch (err) {
+        console.error('Group chat error:', err);
+        writeJSON(chatFp, chat);
+        res.status(500).json({ error: err.message, userMessage: userMsgObj });
+    }
+});
+
+// Cross-character turn or manual trigger without a new user message
+app.post('/api/group-chat/turn', async (req, res) => {
+    const { groupId, chatId, targetCharacterId, replyToMessageId } = req.body;
+    if (!groupId || !targetCharacterId) {
+        return res.status(400).json({ error: 'Missing groupId or targetCharacterId' });
+    }
+    const groupFp = safePath(GROUP_CHATS_DIR, groupId);
+    const memFp = safePath(PRIVATE_MEMORY_DIR, targetCharacterId);
+    if (!groupFp || !memFp) return res.status(400).json({ error: 'Invalid id' });
+
+    const group = readJSON(groupFp);
+    if (!group) return res.status(404).json({ error: 'Group not found' });
+
+    const sessionInfo = resolveGroupSession(groupId, chatId);
+    if (!sessionInfo) return res.status(400).json({ error: 'Failed to resolve group session' });
+    const { chatFp, chat, activeChatId } = sessionInfo;
+
+    try {
+        const { character, content } = await callGroupCharacterLLM({
+            group,
+            messages: chat.messages,
+            targetCharacterId,
+            memFp,
+            userPromptContext: 'Turn continuation'
+        });
+
+        const freshChat = readJSON(chatFp) || chat;
+        if (!Array.isArray(freshChat.messages)) freshChat.messages = [];
+
+        const replyMsg = {
+            id: uuidv4(),
+            senderType: 'character',
+            senderId: targetCharacterId,
+            senderName: character.name,
+            senderAvatar: character.avatar || '',
+            content: content,
+            replyTo: replyToMessageId || null,
+            timestamp: new Date().toISOString()
+        };
+        freshChat.messages.push(replyMsg);
+        freshChat.updatedAt = new Date().toISOString();
+        writeJSON(chatFp, freshChat);
+
+        const freshGroup = readJSON(groupFp) || group;
+        freshGroup.updatedAt = new Date().toISOString();
+        writeJSON(groupFp, freshGroup);
+
+        res.json({
+            replyMessage: replyMsg,
+            groupId: freshGroup.id,
+            chatId: activeChatId
+        });
+    } catch (err) {
+        console.error('Group turn error:', err);
+        res.status(500).json({ error: err.message });
+    }
+});
+
+// Regenerate last character message in group
+app.post('/api/group-chat/regenerate', async (req, res) => {
+    const { groupId, chatId } = req.body;
+    if (!groupId) return res.status(400).json({ error: 'Missing groupId' });
+    const groupFp = safePath(GROUP_CHATS_DIR, groupId);
+    if (!groupFp) return res.status(400).json({ error: 'Invalid group id' });
+
+    const group = readJSON(groupFp);
+    if (!group) return res.status(404).json({ error: 'Group not found' });
+
+    const sessionInfo = resolveGroupSession(groupId, chatId);
+    if (!sessionInfo) return res.status(400).json({ error: 'Failed to resolve group session' });
+    const { chatFp, chat, activeChatId } = sessionInfo;
+
+    if (!Array.isArray(chat.messages) || chat.messages.length === 0) {
+        return res.status(404).json({ error: 'Empty group chat session' });
+    }
+
+    const lastIndex = chat.messages.length - 1;
+    const lastMsg = chat.messages[lastIndex];
+    if (!lastMsg || lastMsg.senderType !== 'character') {
+        return res.status(400).json({ error: 'Last message is not from a character' });
+    }
+
+    const targetCharacterId = lastMsg.senderId;
+    const memFp = safePath(PRIVATE_MEMORY_DIR, targetCharacterId);
+    if (!memFp) return res.status(400).json({ error: 'Invalid memory id' });
+
+    const tempMessages = chat.messages.slice(0, lastIndex);
+
+    try {
+        const { character, content } = await callGroupCharacterLLM({
+            group,
+            messages: tempMessages,
+            targetCharacterId,
+            memFp,
+            userPromptContext: 'Regenerate response'
+        });
+
+        const freshChat = readJSON(chatFp) || chat;
+        const msgToUpdate = freshChat.messages[lastIndex];
+        if (!msgToUpdate) return res.status(404).json({ error: 'Message not found' });
+
+        if (!Array.isArray(msgToUpdate.alternates)) {
+            msgToUpdate.alternates = [msgToUpdate.content];
+            msgToUpdate.selectedAlternate = 0;
+        }
+        msgToUpdate.alternates.push(content);
+        msgToUpdate.selectedAlternate = msgToUpdate.alternates.length - 1;
+        msgToUpdate.content = content;
+        msgToUpdate.timestamp = new Date().toISOString();
+
+        freshChat.updatedAt = new Date().toISOString();
+        writeJSON(chatFp, freshChat);
+
+        const freshGroup = readJSON(groupFp) || group;
+        freshGroup.updatedAt = new Date().toISOString();
+        writeJSON(groupFp, freshGroup);
+
+        res.json({
+            content: content,
+            alternates: msgToUpdate.alternates,
+            selectedAlternate: msgToUpdate.selectedAlternate,
+            groupId: freshGroup.id,
+            chatId: activeChatId,
+            messageIndex: lastIndex
+        });
+    } catch (err) {
+        console.error('Group regenerate error:', err);
+        res.status(500).json({ error: err.message });
+    }
+});
+
+// Set selected alternate in group message
+app.put('/api/groups/:groupId/alternate', (req, res) => {
+    const messageIndex = Number(req.body.messageIndex);
+    const { chatId, selectedAlternate } = req.body;
+    const sessionInfo = resolveGroupSession(req.params.groupId, chatId);
+    if (!sessionInfo) return res.status(400).json({ error: 'Invalid session' });
+    const { chatFp, chat } = sessionInfo;
+
+    if (!Array.isArray(chat.messages) || !Number.isInteger(messageIndex) ||
+        messageIndex < 0 || !chat.messages[messageIndex]) {
+        return res.status(404).json({ error: 'Message not found' });
+    }
+    if (!Number.isInteger(selectedAlternate) || selectedAlternate < 0) {
+        return res.status(400).json({ error: 'selectedAlternate must be non-negative integer' });
+    }
+    chat.messages[messageIndex].selectedAlternate = selectedAlternate;
+    writeJSON(chatFp, chat);
+    res.json({ ok: true });
 });
 
 // ══════════════════════════════════════════════════════════════

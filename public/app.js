@@ -16,8 +16,19 @@ let state = {
     config: {},
     characterSearchQuery: '',
     pinterest: { results: [], index: 0, loading: false },
+    groupPinterest: { results: [], index: 0, loading: false },
     unreadChats: new Set(),
-    _chatNavToken: 0 // monotonic guard against out-of-order chat navigation (C14/15/16)
+    _chatNavToken: 0, // monotonic guard against out-of-order chat navigation (C14/15/16)
+    currentTab: 'characters',
+    groups: [],
+    currentGroupId: null,
+    currentGroupChatId: null,
+    groupChats: [],
+    _groupChatNavToken: 0,
+    _deletingGroupChats: new Set(),
+    activeSpeakerId: null,
+    groupSearchQuery: '',
+    groupModalSelectedIds: new Set()
 };
 
 window.langData = {};
@@ -37,7 +48,13 @@ function getAvatarInnerHtml(avatar, name) {
 
 function getActivePersona() {
     if (!state.personas || state.personas.length === 0) return null;
-    const personaId = state.memory?.personaId;
+    let personaId = state.memory?.personaId;
+    if (state.currentGroupId) {
+        const group = state.groups.find(g => g.id === state.currentGroupId);
+        if (group?.activePersonaId) {
+            personaId = group.activePersonaId;
+        }
+    }
     if (personaId) {
         const found = state.personas.find(p => String(p.id) === String(personaId));
         if (found) return found;
@@ -82,9 +99,9 @@ document.addEventListener('DOMContentLoaded', async () => {
         console.error('Failed to load config', err);
     }
     try {
-        await Promise.all([loadCharacters(), loadPersonas()]);
+        await Promise.all([loadCharacters(), loadPersonas(), loadGroups()]);
     } catch (err) {
-        console.error('Failed to load characters or personas', err);
+        console.error('Failed to load characters, personas, or groups', err);
         if (typeof toast === 'function') toast('Failed to load data from server. Check that the server is running.', 'error');
     }
     testConnection();
@@ -195,7 +212,7 @@ async function testConnection() {
 
     if (result.ok) {
         statusDot.className = 'status-dot online';
-        statusText.textContent = t('sidebar.connected') || 'Connected to Colab';
+        statusText.textContent = t('sidebar.connected') || 'Connected to Backend';
     } else {
         statusDot.className = 'status-dot offline';
         statusText.textContent = result.error || t('sidebar.disconnected') || 'Disconnected';
@@ -268,9 +285,22 @@ function clearCharacterSearchAndFocus() {
 }
 
 async function selectCharacter(id) {
+    state.currentGroupId = null;
+    state.currentGroupChatId = null;
+    const speakerContainer = $('#group-speaker-container');
+    if (speakerContainer) speakerContainer.style.display = 'none';
+    const groupChatTitle = $('#group-chat-list-title');
+    if (groupChatTitle) groupChatTitle.style.display = 'none';
+    const groupChatList = $('#group-chat-list');
+    if (groupChatList) groupChatList.style.display = 'none';
+
     state.currentCharacterId = id;
     state.currentChatId = null;
     renderCharacterList();
+    renderGroupList();
+
+    // Reset status to Online for single character
+    $('#chat-header-status').textContent = t('chat.status.online') || 'Online';
 
     // Load chats and memory for this character in parallel
     const [chats, memory] = await Promise.all([
@@ -389,6 +419,1111 @@ async function deleteCharacter() {
 }
 
 // ══════════════════════════════════════════════════════════
+//  GROUPS & GROUP CHAT
+// ══════════════════════════════════════════════════════════
+
+function switchSidebarTab(tab) {
+    state.currentTab = tab;
+    const charTabBtn = $('#tab-btn-characters');
+    const groupTabBtn = $('#tab-btn-groups');
+    const charPanel = $('#sidebar-panel-characters');
+    const groupPanel = $('#sidebar-panel-groups');
+
+    if (tab === 'characters') {
+        if (charTabBtn) charTabBtn.classList.add('active');
+        if (groupTabBtn) groupTabBtn.classList.remove('active');
+        if (charPanel) charPanel.style.display = 'flex';
+        if (groupPanel) groupPanel.style.display = 'none';
+        const groupChatTitle = $('#group-chat-list-title');
+        if (groupChatTitle) groupChatTitle.style.display = 'none';
+        const groupChatList = $('#group-chat-list');
+        if (groupChatList) groupChatList.style.display = 'none';
+        renderChatList();
+    } else {
+        if (groupTabBtn) groupTabBtn.classList.add('active');
+        if (charTabBtn) charTabBtn.classList.remove('active');
+        if (groupPanel) groupPanel.style.display = 'flex';
+        if (charPanel) charPanel.style.display = 'none';
+        const charChatTitle = $('#chat-list-title');
+        if (charChatTitle) charChatTitle.style.display = 'none';
+        const charChatList = $('#chat-list');
+        if (charChatList) charChatList.innerHTML = '';
+        renderGroupList();
+        if (state.currentGroupId) {
+            renderGroupChatList();
+        }
+    }
+}
+window.switchSidebarTab = switchSidebarTab;
+
+async function loadGroups() {
+    try {
+        const groups = await api('GET', '/api/groups');
+        state.groups = Array.isArray(groups) ? groups : [];
+        renderGroupList();
+    } catch (err) {
+        console.error('Failed to load groups:', err);
+    }
+}
+
+function renderGroupList() {
+    const list = $('#group-list');
+    if (!list) return;
+
+    if (!state.groups || state.groups.length === 0) {
+        list.innerHTML = `
+            <div style="padding: 24px 16px; text-align: center; color: var(--text-muted); font-size: 0.82rem; line-height: 1.5;">
+                Belum ada grup chat.<br>Klik tombol <strong>+ Grup Baru</strong> untuk membuat obrolan multi-karakter!
+            </div>`;
+        return;
+    }
+
+    const query = (state.groupSearchQuery || '').trim().toLowerCase();
+    const filtered = query
+        ? state.groups.filter(g => (g.name || '').toLowerCase().includes(query))
+        : state.groups;
+
+    if (filtered.length === 0) {
+        list.innerHTML = `
+            <div style="padding: 20px; text-align: center; color: var(--text-muted); font-size: 0.82rem;">
+                Tidak ada grup yang cocok dengan pencarian.
+            </div>`;
+        return;
+    }
+
+    list.innerHTML = filtered.map(g => {
+        const memberCount = (g.characterIds || []).length;
+        const avatarHtml = g.avatar
+            ? `<img src="${escapeHtml(g.avatar)}" alt="${escapeHtml(g.name)}">`
+            : '👥';
+        return `
+            <div class="group-item ${g.id === state.currentGroupId ? 'active' : ''}"
+                 data-id="${g.id}" onclick="selectGroup('${g.id}')">
+                <div class="group-avatar-stack">${avatarHtml}</div>
+                <div class="group-item-info">
+                    <div class="group-item-name">${escapeHtml(g.name)}</div>
+                    <div class="group-item-meta">${memberCount} karakter</div>
+                </div>
+            </div>
+        `;
+    }).join('');
+}
+
+function searchGroups(query) {
+    state.groupSearchQuery = query;
+    renderGroupList();
+    const clearBtn = $('#btn-clear-group-search');
+    if (clearBtn) clearBtn.style.display = query ? 'flex' : 'none';
+}
+window.searchGroups = searchGroups;
+
+function clearGroupSearch() {
+    const input = $('#group-search-input');
+    if (input) input.value = '';
+    searchGroups('');
+}
+window.clearGroupSearch = clearGroupSearch;
+
+async function selectGroup(groupId) {
+    state.currentGroupId = groupId;
+    state.currentCharacterId = null;
+    state.currentChatId = null;
+    renderCharacterList();
+    renderGroupList();
+
+    // Hide single character chat list
+    const singleChatTitle = $('#chat-list-title');
+    if (singleChatTitle) singleChatTitle.style.display = 'none';
+    const singleChatList = $('#chat-list');
+    if (singleChatList) singleChatList.innerHTML = '';
+
+    // Show chat view
+    $('#view-welcome').classList.remove('active');
+    $('#view-chat').classList.add('active');
+
+    try {
+        const group = await api('GET', `/api/groups/${groupId}`);
+        if (!group || group.error) {
+            toast(t('app.error_load_group') || 'Grup tidak ditemukan', 'error');
+            return;
+        }
+
+        // Update local group cache
+        const idx = state.groups.findIndex(g => g.id === groupId);
+        if (idx !== -1) {
+            state.groups[idx] = { ...state.groups[idx], ...group };
+        } else {
+            state.groups.push(group);
+        }
+
+        // Default active speaker
+        if (!state.activeSpeakerId || !group.characterIds.includes(state.activeSpeakerId)) {
+            state.activeSpeakerId = (group.characterIds && group.characterIds.length > 0) ? group.characterIds[0] : null;
+        }
+
+        // Update Header
+        const avatarHtml = group.avatar
+            ? `<img src="${escapeHtml(group.avatar)}" alt="${escapeHtml(group.name)}" style="width:100%;height:100%;object-fit:cover;border-radius:var(--radius-sm)">`
+            : '👥';
+        $('#chat-header-avatar').innerHTML = avatarHtml;
+        $('#chat-header-name').textContent = group.name;
+
+        // Requirement 1: Summarize header status to "<count> Anggota"
+        const memberCount = (group.characterIds || []).length;
+        $('#chat-header-status').textContent = `${memberCount} ${t('group.members_suffix') || 'Anggota'}`;
+
+        // Render speaker bar
+        renderGroupSpeakerBar(group);
+
+        // Load sessions for this group
+        await loadGroupChats(groupId);
+
+        closeSidebarOnMobile();
+    } catch (err) {
+        console.error('Error selecting group:', err);
+    }
+}
+window.selectGroup = selectGroup;
+
+// ── GROUP CHAT SESSIONS ──
+
+async function loadGroupChats(groupId) {
+    const listTitle = $('#group-chat-list-title');
+    const list = $('#group-chat-list');
+    if (!listTitle || !list) return;
+
+    listTitle.style.display = 'block';
+    list.style.display = 'block';
+
+    const myToken = ++state._groupChatNavToken;
+    try {
+        const chats = await api('GET', `/api/groups/${groupId}/chats`);
+        if (myToken !== state._groupChatNavToken) return;
+        state.groupChats = Array.isArray(chats) ? chats : [];
+        renderGroupChatList();
+
+        if (state.groupChats.length > 0) {
+            const exists = state.groupChats.some(c => c.id === state.currentGroupChatId);
+            const targetChatId = exists ? state.currentGroupChatId : state.groupChats[0].id;
+            await loadGroupChat(targetChatId);
+        } else {
+            await startNewGroupChat();
+        }
+    } catch (err) {
+        console.error('Failed to load group chats:', err);
+    }
+}
+
+function renderGroupChatList() {
+    const listTitle = $('#group-chat-list-title');
+    const list = $('#group-chat-list');
+    if (!listTitle || !list) return;
+
+    if (!state.currentGroupId || state.groupChats.length === 0) {
+        listTitle.style.display = 'none';
+        list.style.display = 'none';
+        list.innerHTML = '';
+        return;
+    }
+
+    listTitle.style.display = 'block';
+    list.style.display = 'block';
+
+    list.innerHTML = state.groupChats.map(c => `
+        <div class="chat-item ${c.id === state.currentGroupChatId ? 'active' : ''}"
+             data-id="${c.id}" onclick="loadGroupChat('${c.id}')">
+            <span class="chat-item-icon">💬</span>
+            <span class="chat-item-title">${escapeHtml(c.title || 'New Session')}</span>
+            <div class="chat-item-actions">
+                <button class="chat-item-edit" onclick="event.stopPropagation(); startRenameGroupChat('${c.id}')" title="Rename">✏️</button>
+                <button class="chat-item-delete" onclick="event.stopPropagation(); deleteGroupChat('${c.id}')" title="Delete">✕</button>
+            </div>
+        </div>
+    `).join('');
+}
+
+async function loadGroupChat(chatId) {
+    if (!state.currentGroupId) return;
+    const myToken = ++state._groupChatNavToken;
+
+    const chat = await api('GET', `/api/groups/${state.currentGroupId}/chat/${chatId}`);
+    if (!chat || chat.error) return;
+    if (myToken !== state._groupChatNavToken) return;
+
+    state.currentGroupChatId = chatId;
+    renderGroupChatList();
+    renderGroupMessages(chat.messages || []);
+    closeSidebarOnMobile();
+}
+
+async function startNewGroupChat() {
+    if (!state.currentGroupId) return;
+    try {
+        const newChat = await api('POST', `/api/groups/${state.currentGroupId}/chats`, {
+            title: t('group.new_session') || 'New Session'
+        });
+        state.groupChats.unshift(newChat);
+        state.currentGroupChatId = newChat.id;
+        renderGroupChatList();
+        renderGroupMessages([]);
+    } catch (err) {
+        toast(`Error: ${err.message}`, 'error');
+    }
+}
+window.startNewGroupChat = startNewGroupChat;
+
+window.startRenameGroupChat = function (chatId) {
+    const chatItem = document.querySelector(`#group-chat-list .chat-item[data-id="${chatId}"]`);
+    if (!chatItem) return;
+
+    const chat = state.groupChats.find(c => c.id === chatId);
+    if (!chat) return;
+
+    const currentTitle = chat.title || 'New Session';
+
+    chatItem.removeAttribute('onclick');
+    chatItem.innerHTML = `
+        <span class="chat-item-icon">💬</span>
+        <div class="chat-item-rename-container">
+            <input type="text" class="chat-item-rename-input" value="${escapeHtml(currentTitle)}"
+                   data-chat-id="${chatId}" autocomplete="off">
+            <div class="chat-item-rename-actions">
+                <button class="chat-rename-save" onclick="event.stopPropagation(); saveRenameGroupChat('${chatId}')" title="Simpan">✓</button>
+                <button class="chat-rename-cancel" onclick="event.stopPropagation(); cancelRenameGroupChat()" title="Batal">✕</button>
+            </div>
+        </div>
+    `;
+
+    const input = chatItem.querySelector('.chat-item-rename-input');
+    input.focus();
+    input.select();
+
+    input.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter') {
+            e.preventDefault();
+            saveRenameGroupChat(chatId);
+        } else if (e.key === 'Escape') {
+            cancelRenameGroupChat();
+        }
+    });
+};
+
+window.saveRenameGroupChat = async function (chatId) {
+    const input = document.querySelector(`#group-chat-list .chat-item-rename-input[data-chat-id="${chatId}"]`);
+    if (!input) return;
+
+    const newTitle = input.value.trim();
+    if (!newTitle) return cancelRenameGroupChat();
+
+    const requestGroupId = state.currentGroupId;
+
+    try {
+        await api('PUT', `/api/groups/${requestGroupId}/chat/${chatId}`, { title: newTitle });
+        if (state.currentGroupId !== requestGroupId) return;
+
+        const chat = state.groupChats.find(c => c.id === chatId);
+        if (chat) chat.title = newTitle;
+
+        renderGroupChatList();
+        toast('Session renamed!', 'success');
+    } catch (err) {
+        toast(`Error: ${err.message}`, 'error');
+        if (state.currentGroupId === requestGroupId) renderGroupChatList();
+    }
+};
+
+window.cancelRenameGroupChat = function () {
+    renderGroupChatList();
+};
+
+async function deleteGroupChat(chatId) {
+    if (!confirm(t('app.confirm_delete_group_chat') || 'Hapus sesi chat grup ini?')) return;
+
+    state._deletingGroupChats = state._deletingGroupChats || new Set();
+    if (state._deletingGroupChats.has(chatId)) return;
+    state._deletingGroupChats.add(chatId);
+
+    const myToken = ++state._groupChatNavToken;
+    const requestGroupId = state.currentGroupId;
+
+    try {
+        await api('DELETE', `/api/groups/${requestGroupId}/chat/${chatId}`);
+
+        if (state.currentGroupChatId === chatId) {
+            state.currentGroupChatId = null;
+        }
+
+        const freshChats = await api('GET', `/api/groups/${requestGroupId}/chats`);
+        if (myToken !== state._groupChatNavToken) return;
+        if (state.currentGroupId !== requestGroupId) return;
+
+        state.groupChats = Array.isArray(freshChats) ? freshChats : [];
+
+        if (state.groupChats.length > 0) {
+            await loadGroupChat(state.groupChats[0].id);
+        } else {
+            await startNewGroupChat();
+        }
+
+        toast(t('toast.chat_deleted') || 'Chat deleted', 'info');
+    } catch (err) {
+        toast(`Error: ${err.message}`, 'error');
+    } finally {
+        state._deletingGroupChats.delete(chatId);
+    }
+}
+window.deleteGroupChat = deleteGroupChat;
+
+function renderGroupSpeakerBar(group) {
+    const container = $('#group-speaker-container');
+    const chipsDiv = $('#group-speaker-chips');
+    if (!container || !chipsDiv) return;
+
+    if (!group || !state.currentGroupId) {
+        container.style.display = 'none';
+        return;
+    }
+
+    container.style.display = 'flex';
+
+    const members = (group.characterIds || []).map(cid => {
+        return state.characters.find(c => c.id === cid);
+    }).filter(Boolean);
+
+    if (!state.activeSpeakerId && members.length > 0) {
+        state.activeSpeakerId = members[0].id;
+    }
+
+    chipsDiv.innerHTML = members.map(m => {
+        const isActive = m.id === state.activeSpeakerId;
+        const avatarHtml = m.avatar
+            ? `<img src="${escapeHtml(m.avatar)}" alt="${escapeHtml(m.name)}">`
+            : (m.name ? m.name.charAt(0).toUpperCase() : 'C');
+        return `
+            <button type="button" class="speaker-chip ${isActive ? 'active' : ''}"
+                    onclick="setActiveGroupSpeaker('${m.id}')"
+                    title="Pilih ${escapeHtml(m.name)} untuk menjawab pesan berikutnya">
+                <div class="speaker-chip-avatar">${avatarHtml}</div>
+                <span>${escapeHtml(m.name)}</span>
+            </button>
+        `;
+    }).join('');
+}
+
+function setActiveGroupSpeaker(charId) {
+    state.activeSpeakerId = charId;
+    const group = state.groups.find(g => g.id === state.currentGroupId);
+    if (group) renderGroupSpeakerBar(group);
+}
+window.setActiveGroupSpeaker = setActiveGroupSpeaker;
+
+function renderGroupMessages(messages) {
+    const container = $('#chat-messages');
+    if (!container) return;
+
+    if (!messages || messages.length === 0) {
+        container.innerHTML = `
+            <div class="empty-chat">
+                <div class="empty-chat-icon">👥</div>
+                <p>Mulai percakapan di sesi grup ini!</p>
+            </div>`;
+        return;
+    }
+
+    const currentGroup = state.groups.find(g => g.id === state.currentGroupId);
+
+    container.innerHTML = messages.map((m, index) => {
+        const time = m.timestamp ? formatTime(m.timestamp) : '';
+        const isUser = m.senderType === 'user' || m.senderId === 'user';
+        const isLast = index === messages.length - 1;
+        const isLastCharacter = !isUser && isLast;
+
+        let avatarHtml = '👤';
+        let senderName = m.senderName || (isUser ? 'User' : 'Character');
+
+        if (isUser) {
+            avatarHtml = getUserAvatarInnerHtml();
+        } else {
+            const char = state.characters.find(c => c.id === m.senderId);
+            if (char) {
+                senderName = char.name;
+                avatarHtml = getAvatarInnerHtml(char.avatar, char.name);
+            } else if (m.senderAvatar) {
+                avatarHtml = getAvatarInnerHtml(m.senderAvatar, senderName);
+            }
+        }
+
+        let contentHtml = formatMessageContent(m.content);
+
+        // Alternates
+        let alternatesHtml = '';
+        if (m.alternates && m.alternates.length > 1) {
+            const total = m.alternates.length;
+            const current = (m.selectedAlternate || 0) + 1;
+            alternatesHtml = `
+                <div class="alternate-nav">
+                    <button onclick="changeGroupAlternate(${index}, -1)">&lt;</button>
+                    <span>${current}/${total}</span>
+                    <button onclick="changeGroupAlternate(${index}, 1)">&gt;</button>
+                </div>
+            `;
+            const selIdx = m.selectedAlternate || 0;
+            contentHtml = formatMessageContent(m.alternates[selIdx] || m.content);
+        }
+
+        const regenerateBtn = isLastCharacter
+            ? `<button class="regenerate-btn" onclick="regenerateGroupLastMessage()" title="${t('chat.action.regenerate') || 'Regenerate'}">🔄</button>`
+            : '';
+        const touchEvents = isLastCharacter ? 'ontouchstart="handleTouchStart(event)" ontouchend="handleTouchEnd(event, this)"' : '';
+
+        return `
+            <div class="message ${isUser ? 'user' : 'assistant'}" data-index="${index}">
+                <div class="message-avatar">${avatarHtml}</div>
+                <div style="flex:1; min-width:0;">
+                    <div class="group-message-sender">
+                        <span>${escapeHtml(senderName)}</span>
+                    </div>
+                    <div class="message-bubble-container" ${touchEvents}>
+                        <div class="message-bubble" style="width:100%">${contentHtml}</div>
+                        ${regenerateBtn}
+                    </div>
+                    ${alternatesHtml}
+                    <div class="message-meta">
+                        ${time ? `<span class="message-time">${time}</span>` : ''}
+                        <button class="message-action-btn" onclick="editGroupMessage(${index})" title="${t('chat.action.edit') || t('btn.edit') || 'Edit'}">✏️</button>
+                        <button class="message-action-btn message-delete-btn" onclick="deleteGroupMessage(${index})" title="${t('chat.action.delete') || 'Hapus'}">🗑️</button>
+                    </div>
+                </div>
+            </div>
+        `;
+    }).join('');
+
+    scrollToBottom();
+}
+
+function appendGroupMessage(senderType, content, senderName, avatarData, isLastCharacter = false, senderId = null) {
+    const container = $('#chat-messages');
+    const empty = container.querySelector('.empty-chat');
+    if (empty) empty.remove();
+
+    const isUser = senderType === 'user';
+    const avatarHtml = isUser ? getUserAvatarInnerHtml() : getAvatarInnerHtml(avatarData, senderName);
+    const now = new Date();
+    const time = formatTime(now.toISOString());
+
+    if (isLastCharacter) {
+        $$('.regenerate-btn').forEach(btn => btn.remove());
+        $$('.message-bubble-container').forEach(c => {
+            c.removeAttribute('ontouchstart');
+            c.removeAttribute('ontouchend');
+            c.classList.remove('swiped-left');
+        });
+    }
+
+    const index = document.querySelectorAll('#chat-messages .message').length;
+    const regenerateBtn = isLastCharacter
+        ? `<button class="regenerate-btn" onclick="regenerateGroupLastMessage()" title="${t('chat.action.regenerate') || 'Regenerate'}">🔄</button>`
+        : '';
+    const touchEvents = isLastCharacter ? 'ontouchstart="handleTouchStart(event)" ontouchend="handleTouchEnd(event, this)"' : '';
+
+    const div = document.createElement('div');
+    div.className = `message ${isUser ? 'user' : 'assistant'}`;
+    div.dataset.index = index;
+    div.innerHTML = `
+        <div class="message-avatar">${avatarHtml}</div>
+        <div style="flex:1; min-width:0;">
+            <div class="group-message-sender">
+                <span>${escapeHtml(senderName || 'Member')}</span>
+            </div>
+            <div class="message-bubble-container" ${touchEvents}>
+                <div class="message-bubble" style="width:100%">${formatMessageContent(content)}</div>
+                ${regenerateBtn}
+            </div>
+            <div class="message-meta">
+                <span class="message-time">${time}</span>
+                <button class="message-action-btn" onclick="editGroupMessage(${index})" title="${t('chat.action.edit') || t('btn.edit') || 'Edit'}">✏️</button>
+                <button class="message-action-btn message-delete-btn" onclick="deleteGroupMessage(${index})" title="${t('chat.action.delete') || 'Hapus'}">🗑️</button>
+            </div>
+        </div>
+    `;
+    container.appendChild(div);
+    scrollToBottom();
+    return div;
+}
+
+async function sendGroupMessage(text) {
+    const input = $('#chat-input');
+    const group = state.groups.find(g => g.id === state.currentGroupId);
+    if (!group) return;
+
+    if (state.sending) {
+        toast(t('toast.please_wait') || 'Harap tunggu balasan selesai', 'info');
+        return;
+    }
+
+    if (!state.currentGroupChatId) {
+        await startNewGroupChat();
+    }
+
+    // Auto-detect @Mention
+    let targetId = state.activeSpeakerId;
+    for (const cid of (group.characterIds || [])) {
+        const c = state.characters.find(x => x.id === cid);
+        if (c && c.name) {
+            const escapedName = c.name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+            const regex = new RegExp(`@${escapedName}\\b`, 'i');
+            if (regex.test(text)) {
+                targetId = cid;
+                state.activeSpeakerId = cid;
+                renderGroupSpeakerBar(group);
+                break;
+            }
+        }
+    }
+
+    if (!targetId && group.characterIds && group.characterIds.length > 0) {
+        targetId = group.characterIds[0];
+        state.activeSpeakerId = targetId;
+        renderGroupSpeakerBar(group);
+    }
+
+    state.sending = true;
+    input.value = '';
+    autoResizeInput();
+
+    // Show user message immediately
+    const userPersona = getActivePersona();
+    const userName = (userPersona && userPersona.name) ? userPersona.name : 'User';
+    const userBubble = appendGroupMessage('user', text, userName, userPersona?.avatar);
+
+    $('#typing-indicator').style.display = 'flex';
+    $('#btn-send').disabled = true;
+
+    try {
+        const result = await api('POST', '/api/group-chat/send', {
+            groupId: state.currentGroupId,
+            chatId: state.currentGroupChatId,
+            targetCharacterId: targetId,
+            userMessage: text
+        });
+
+        $('#typing-indicator').style.display = 'none';
+
+        if (result.error) {
+            if (userBubble) userBubble.remove();
+            input.value = text;
+            autoResizeInput();
+            toast(result.error, 'error');
+            return;
+        }
+
+        // Fetch fresh group chat session messages and re-render
+        const fresh = await api('GET', `/api/groups/${state.currentGroupId}/chat/${state.currentGroupChatId}`);
+        if (fresh && Array.isArray(fresh.messages)) {
+            renderGroupMessages(fresh.messages);
+            const sChat = state.groupChats.find(c => c.id === state.currentGroupChatId);
+            if (sChat) {
+                sChat.messageCount = fresh.messages.length;
+                renderGroupChatList();
+            }
+        } else if (result.replyMessage) {
+            appendGroupMessage('character', result.replyMessage.content, result.replyMessage.senderName, result.replyMessage.senderAvatar, true, result.replyMessage.senderId);
+        }
+    } catch (err) {
+        $('#typing-indicator').style.display = 'none';
+        toast(`Error: ${err.message}`, 'error');
+    } finally {
+        state.sending = false;
+        $('#btn-send').disabled = false;
+    }
+}
+
+async function triggerActiveSpeakerTurn() {
+    if (!state.currentGroupId) return;
+    const group = state.groups.find(g => g.id === state.currentGroupId);
+    if (!group) return;
+
+    if (!state.activeSpeakerId && group.characterIds && group.characterIds.length > 0) {
+        state.activeSpeakerId = group.characterIds[0];
+    }
+    if (!state.activeSpeakerId) {
+        toast('Pilih karakter yang akan berbicara', 'info');
+        return;
+    }
+
+    await triggerGroupTurn(state.activeSpeakerId);
+}
+window.triggerActiveSpeakerTurn = triggerActiveSpeakerTurn;
+
+async function triggerGroupTurn(targetCharacterId, replyToMessageId = null) {
+    if (!state.currentGroupId) return;
+    if (state.sending) {
+        toast(t('toast.please_wait') || 'Harap tunggu balasan selesai', 'info');
+        return;
+    }
+
+    if (!state.currentGroupChatId) {
+        await startNewGroupChat();
+    }
+
+    state.sending = true;
+    $('#typing-indicator').style.display = 'flex';
+    $('#btn-send').disabled = true;
+
+    try {
+        const result = await api('POST', '/api/group-chat/turn', {
+            groupId: state.currentGroupId,
+            chatId: state.currentGroupChatId,
+            targetCharacterId: targetCharacterId,
+            replyToMessageId: replyToMessageId
+        });
+
+        $('#typing-indicator').style.display = 'none';
+
+        if (result.error) {
+            toast(result.error, 'error');
+            return;
+        }
+
+        const fresh = await api('GET', `/api/groups/${state.currentGroupId}/chat/${state.currentGroupChatId}`);
+        if (fresh && Array.isArray(fresh.messages)) {
+            renderGroupMessages(fresh.messages);
+            const sChat = state.groupChats.find(c => c.id === state.currentGroupChatId);
+            if (sChat) {
+                sChat.messageCount = fresh.messages.length;
+                renderGroupChatList();
+            }
+        } else if (result.replyMessage) {
+            appendGroupMessage('character', result.replyMessage.content, result.replyMessage.senderName, result.replyMessage.senderAvatar, true, result.replyMessage.senderId);
+        }
+    } catch (err) {
+        $('#typing-indicator').style.display = 'none';
+        toast(`Error: ${err.message}`, 'error');
+    } finally {
+        state.sending = false;
+        $('#btn-send').disabled = false;
+    }
+}
+
+async function regenerateGroupLastMessage() {
+    if (!state.currentGroupId || !state.currentGroupChatId || state.sending) return;
+
+    state.sending = true;
+    const btn = document.querySelector('.regenerate-btn');
+    if (btn) btn.innerHTML = '<span class="spinner"></span>';
+    const sendBtn = $('#btn-send');
+    if (sendBtn) sendBtn.disabled = true;
+    $('#typing-indicator').style.display = 'flex';
+
+    try {
+        const result = await api('POST', '/api/group-chat/regenerate', {
+            groupId: state.currentGroupId,
+            chatId: state.currentGroupChatId
+        });
+
+        $('#typing-indicator').style.display = 'none';
+
+        if (result.error) {
+            toast(result.error, 'error');
+            return;
+        }
+
+        const fresh = await api('GET', `/api/groups/${state.currentGroupId}/chat/${state.currentGroupChatId}`);
+        if (fresh && Array.isArray(fresh.messages)) {
+            renderGroupMessages(fresh.messages);
+        }
+    } catch (err) {
+        $('#typing-indicator').style.display = 'none';
+        toast(`Error: ${err.message}`, 'error');
+    } finally {
+        state.sending = false;
+        if (btn) btn.innerHTML = '🔄';
+        if (sendBtn) sendBtn.disabled = false;
+    }
+}
+window.regenerateGroupLastMessage = regenerateGroupLastMessage;
+
+async function changeGroupAlternate(index, delta) {
+    if (!state.currentGroupId || !state.currentGroupChatId) return;
+    const group = await api('GET', `/api/groups/${state.currentGroupId}/chat/${state.currentGroupChatId}`);
+    if (!group || !Array.isArray(group.messages) || !group.messages[index]) return;
+
+    const msg = group.messages[index];
+    if (!msg.alternates || msg.alternates.length <= 1) return;
+
+    let newIndex = (msg.selectedAlternate || 0) + delta;
+    if (newIndex < 0) newIndex = msg.alternates.length - 1;
+    if (newIndex >= msg.alternates.length) newIndex = 0;
+
+    await api('PUT', `/api/groups/${state.currentGroupId}/alternate`, {
+        chatId: state.currentGroupChatId,
+        messageIndex: index,
+        selectedAlternate: newIndex
+    });
+
+    msg.selectedAlternate = newIndex;
+    renderGroupMessages(group.messages);
+}
+window.changeGroupAlternate = changeGroupAlternate;
+
+window.editGroupMessage = async function (index) {
+    if (!state.currentGroupId || !state.currentGroupChatId) return;
+
+    const requestGroupId = state.currentGroupId;
+    const requestChatId = state.currentGroupChatId;
+
+    const groupChat = await api('GET', `/api/groups/${requestGroupId}/chat/${requestChatId}`);
+    if (!groupChat || !Array.isArray(groupChat.messages)) return;
+    if (state.currentGroupId !== requestGroupId || state.currentGroupChatId !== requestChatId) return;
+
+    const msg = groupChat.messages[index];
+    if (!msg) return;
+
+    const messageDiv = document.querySelector(`.message[data-index="${index}"]`);
+    if (!messageDiv) return;
+
+    const msgEl = messageDiv.querySelector('.message-bubble-container');
+    const metaEl = messageDiv.querySelector('.message-meta');
+    const alternatesEl = messageDiv.querySelector('.alternate-nav');
+
+    const originalContent = msg.alternates ? (msg.alternates[msg.selectedAlternate || 0] || msg.content) : msg.content;
+
+    if (msgEl) msgEl.style.display = 'none';
+    if (metaEl) metaEl.style.display = 'none';
+    if (alternatesEl) alternatesEl.style.display = 'none';
+
+    const existing = document.getElementById(`group-edit-container-${index}`);
+    if (existing) existing.remove();
+
+    const editContainer = document.createElement('div');
+    editContainer.className = 'message-edit-container';
+    editContainer.id = `group-edit-container-${index}`;
+    editContainer.innerHTML = `
+        <textarea class="message-edit-textarea" id="group-edit-textarea-${index}">${escapeHtml(originalContent)}</textarea>
+        <div class="message-edit-actions">
+            <button class="btn-secondary" style="padding: 6px 12px; font-size: 0.85rem;" onclick="cancelEditGroupMessage(${index})">${t('btn.cancel') || 'Cancel'}</button>
+            <button class="btn-primary" style="padding: 6px 12px; font-size: 0.85rem;" onclick="saveEditGroupMessage(${index})">${t('btn.save') || 'Save'}</button>
+        </div>
+    `;
+
+    msgEl.parentNode.insertBefore(editContainer, msgEl);
+    messageDiv.classList.add('is-editing');
+
+    const textarea = document.getElementById(`group-edit-textarea-${index}`);
+    const resizeTextarea = () => {
+        textarea.style.height = 'auto';
+        textarea.style.height = Math.max(120, textarea.scrollHeight) + 'px';
+    };
+    textarea.addEventListener('input', resizeTextarea);
+    setTimeout(() => {
+        resizeTextarea();
+        textarea.focus();
+    }, 0);
+};
+
+window.cancelEditGroupMessage = function (index) {
+    const editContainer = document.getElementById(`group-edit-container-${index}`);
+    if (editContainer) editContainer.remove();
+
+    const messageDiv = document.querySelector(`.message[data-index="${index}"]`);
+    if (!messageDiv) return;
+
+    const msgEl = messageDiv.querySelector('.message-bubble-container');
+    const metaEl = messageDiv.querySelector('.message-meta');
+    const alternatesEl = messageDiv.querySelector('.alternate-nav');
+
+    if (msgEl) msgEl.style.display = '';
+    if (metaEl) metaEl.style.display = 'flex';
+    if (alternatesEl) alternatesEl.style.display = 'flex';
+
+    messageDiv.classList.remove('is-editing');
+};
+
+window.saveEditGroupMessage = async function (index) {
+    const textarea = document.getElementById(`group-edit-textarea-${index}`);
+    if (!textarea) return;
+
+    const newContent = textarea.value.trim();
+    if (!newContent) return cancelEditGroupMessage(index);
+
+    const requestGroupId = state.currentGroupId;
+    const requestChatId = state.currentGroupChatId;
+
+    const btn = textarea.nextElementSibling.querySelector('.btn-primary');
+    if (btn) {
+        btn.disabled = true;
+        btn.textContent = t('btn.saving') || 'Saving...';
+    }
+
+    try {
+        const result = await api('PUT', `/api/groups/${requestGroupId}/chat/${requestChatId}/message`, {
+            messageIndex: index,
+            content: newContent
+        });
+
+        if (result && result.error) {
+            toast(result.error, 'error');
+            if (btn) {
+                btn.disabled = false;
+                btn.textContent = t('btn.save') || 'Save';
+            }
+            return;
+        }
+
+        if (state.currentGroupId === requestGroupId && state.currentGroupChatId === requestChatId) {
+            const fresh = await api('GET', `/api/groups/${requestGroupId}/chat/${requestChatId}`);
+            if (fresh && Array.isArray(fresh.messages)) {
+                renderGroupMessages(fresh.messages);
+            }
+        }
+    } catch (err) {
+        toast(`Error saving edit: ${err.message}`, 'error');
+        if (btn) {
+            btn.disabled = false;
+            btn.textContent = t('btn.save') || 'Save';
+        }
+    }
+};
+
+async function deleteGroupMessage(index) {
+    if (!confirm(t('chat.confirm_delete_msg') || 'Hapus pesan ini?')) return;
+    try {
+        await api('DELETE', `/api/groups/${state.currentGroupId}/chat/${state.currentGroupChatId}/message/${index}`);
+        const fresh = await api('GET', `/api/groups/${state.currentGroupId}/chat/${state.currentGroupChatId}`);
+        if (fresh && Array.isArray(fresh.messages)) {
+            renderGroupMessages(fresh.messages);
+            const sChat = state.groupChats.find(c => c.id === state.currentGroupChatId);
+            if (sChat) {
+                sChat.messageCount = fresh.messages.length;
+                renderGroupChatList();
+            }
+        }
+    } catch (err) {
+        toast(`Error deleting message: ${err.message}`, 'error');
+    }
+}
+window.deleteGroupMessage = deleteGroupMessage;
+
+
+// ── Modal Group Editor ──
+function openNewGroupModal() {
+    $('#group-edit-id').value = '';
+    $('#group-modal-title').textContent = t('group_edit.title_new') || '👥 Buat Grup Baru';
+    $('#group-name').value = '';
+    $('#group-scenario').value = '';
+    $('#group-avatar').value = '';
+    $('#group-avatar-file').value = '';
+    updateGroupAvatarPreview('');
+    $('#btn-delete-group').style.display = 'none';
+
+    // Reset Pinterest for group
+    state.groupPinterest = { results: [], index: 0, loading: false };
+    const pPanel = $('#group-pinterest-panel');
+    if (pPanel) pPanel.style.display = 'none';
+    const pResults = $('#group-pinterest-results');
+    if (pResults) pResults.style.display = 'none';
+    const pStatus = $('#group-pinterest-status');
+    if (pStatus) pStatus.textContent = '';
+    const pQuery = $('#group-pinterest-query');
+    if (pQuery) pQuery.value = '';
+    const pToggle = $('#group-avatar-pinterest-toggle');
+    if (pToggle) pToggle.classList.remove('active');
+
+    state.groupModalSelectedIds = new Set();
+    renderGroupModalMemberPicker();
+    openModal('modal-group');
+}
+window.openNewGroupModal = openNewGroupModal;
+
+function openEditGroupModal(groupId) {
+    const group = state.groups.find(g => g.id === groupId);
+    if (!group) return;
+
+    $('#group-edit-id').value = group.id;
+    $('#group-modal-title').textContent = t('group_edit.title_edit') || '✏️ Edit Grup';
+    $('#group-name').value = group.name || '';
+    $('#group-scenario').value = group.scenario || '';
+    $('#group-avatar').value = group.avatar || '';
+    $('#group-avatar-file').value = '';
+    updateGroupAvatarPreview(group.avatar || '');
+    $('#btn-delete-group').style.display = 'block';
+
+    // Reset Pinterest for group
+    state.groupPinterest = { results: [], index: 0, loading: false };
+    const pPanel = $('#group-pinterest-panel');
+    if (pPanel) pPanel.style.display = 'none';
+    const pResults = $('#group-pinterest-results');
+    if (pResults) pResults.style.display = 'none';
+    const pStatus = $('#group-pinterest-status');
+    if (pStatus) pStatus.textContent = '';
+    const pQuery = $('#group-pinterest-query');
+    if (pQuery) pQuery.value = group.name || '';
+    const pToggle = $('#group-avatar-pinterest-toggle');
+    if (pToggle) pToggle.classList.remove('active');
+
+    state.groupModalSelectedIds = new Set(group.characterIds || []);
+    renderGroupModalMemberPicker();
+    openModal('modal-group');
+}
+window.openEditGroupModal = openEditGroupModal;
+
+function renderGroupModalMemberPicker(query = '') {
+    const picker = $('#group-character-picker');
+    const countEl = $('#selected-member-count');
+    if (!picker) return;
+
+    const q = (query || '').trim().toLowerCase();
+    const filtered = q
+        ? state.characters.filter(c => (c.name || '').toLowerCase().includes(q))
+        : state.characters;
+
+    if (countEl) {
+        countEl.textContent = `${state.groupModalSelectedIds.size} terpilih`;
+    }
+
+    if (filtered.length === 0) {
+        picker.innerHTML = `<div style="grid-column:1/-1;padding:12px;text-align:center;color:var(--text-muted);font-size:0.8rem;">Tidak ada karakter yang cocok.</div>`;
+        return;
+    }
+
+    picker.innerHTML = filtered.map(c => {
+        const isSelected = state.groupModalSelectedIds.has(c.id);
+        const avatarHtml = c.avatar
+            ? `<img src="${escapeHtml(c.avatar)}" alt="${escapeHtml(c.name)}">`
+            : (c.name ? c.name.charAt(0).toUpperCase() : 'C');
+        return `
+            <div class="picker-char-card ${isSelected ? 'selected' : ''}" onclick="toggleGroupMemberSelection('${c.id}')">
+                <input type="checkbox" class="picker-char-check" ${isSelected ? 'checked' : ''} onclick="event.stopPropagation(); toggleGroupMemberSelection('${c.id}')">
+                <div class="picker-char-avatar">${avatarHtml}</div>
+                <div class="picker-char-name">${escapeHtml(c.name)}</div>
+            </div>
+        `;
+    }).join('');
+}
+
+function filterGroupModalMembers(query) {
+    renderGroupModalMemberPicker(query);
+}
+window.filterGroupModalMembers = filterGroupModalMembers;
+
+function toggleGroupMemberSelection(charId) {
+    if (state.groupModalSelectedIds.has(charId)) {
+        state.groupModalSelectedIds.delete(charId);
+    } else {
+        state.groupModalSelectedIds.add(charId);
+    }
+    const searchInput = $('#group-modal-member-search');
+    renderGroupModalMemberPicker(searchInput ? searchInput.value : '');
+}
+window.toggleGroupMemberSelection = toggleGroupMemberSelection;
+
+async function saveGroup() {
+    let editId = $('#group-edit-id').value;
+    const name = ($('#group-name').value || '').trim();
+    const scenario = ($('#group-scenario').value || '').trim();
+    const avatar = $('#group-avatar').value;
+
+    if (!name) {
+        toast('Nama grup harus diisi', 'error');
+        $('#group-name').focus();
+        return;
+    }
+
+    const characterIds = Array.from(state.groupModalSelectedIds);
+    if (characterIds.length === 0) {
+        toast('Pilih minimal 1 karakter untuk anggota grup', 'error');
+        return;
+    }
+
+    // Preserve existing activePersonaId if already set on group
+    const existingGroup = state.groups.find(g => g.id === editId);
+    const activePersonaId = existingGroup?.activePersonaId || null;
+
+    const payload = {
+        name,
+        scenario,
+        avatar,
+        activePersonaId,
+        characterIds
+    };
+
+    try {
+        if (editId) {
+            await api('PUT', `/api/groups/${editId}`, payload);
+            toast(t('toast.group_updated') || 'Grup berhasil diperbarui!', 'success');
+        } else {
+            const created = await api('POST', '/api/groups', payload);
+            toast(t('toast.group_created') || 'Grup berhasil dibuat!', 'success');
+            editId = created.id;
+        }
+
+        await loadGroups();
+        closeModal('modal-group');
+
+        const targetId = editId || (state.groups[0] ? state.groups[0].id : null);
+        if (targetId) {
+            selectGroup(targetId);
+        }
+    } catch (err) {
+        toast(`Error saving group: ${err.message}`, 'error');
+    }
+}
+window.saveGroup = saveGroup;
+
+async function confirmDeleteGroup() {
+    const editId = $('#group-edit-id').value;
+    if (!editId) return;
+
+    if (!confirm('Hapus grup ini beserta seluruh riwayat obrolannya?')) return;
+
+    try {
+        await api('DELETE', `/api/groups/${editId}`);
+        toast(t('toast.group_deleted') || 'Grup berhasil dihapus', 'info');
+        closeModal('modal-group');
+        state.currentGroupId = null;
+        state.currentGroupChatId = null;
+        state.groupChats = [];
+        const groupChatTitle = $('#group-chat-list-title');
+        if (groupChatTitle) groupChatTitle.style.display = 'none';
+        const groupChatList = $('#group-chat-list');
+        if (groupChatList) groupChatList.style.display = 'none';
+        await loadGroups();
+        showView('view-welcome');
+    } catch (err) {
+        toast(`Error: ${err.message}`, 'error');
+    }
+}
+window.confirmDeleteGroup = confirmDeleteGroup;
+
+function updateGroupAvatarPreview(avatarData) {
+    const preview = $('#group-avatar-preview');
+    const removeBtn = $('#group-avatar-remove-btn');
+    if (!preview || !removeBtn) return;
+    if (avatarData) {
+        preview.innerHTML = `<img src="${escapeHtml(avatarData)}" alt="avatar">`;
+        preview.classList.add('has-image');
+        removeBtn.style.display = 'flex';
+    } else {
+        preview.innerHTML = `
+            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+                <polyline points="17 8 12 3 7 8"/>
+                <line x1="12" y1="3" x2="12" y2="15"/>
+            </svg>
+            <span>Upload</span>`;
+        preview.classList.remove('has-image');
+        removeBtn.style.display = 'none';
+    }
+}
+
+function removeGroupAvatar() {
+    $('#group-avatar').value = '';
+    $('#group-avatar-file').value = '';
+    updateGroupAvatarPreview('');
+}
+window.removeGroupAvatar = removeGroupAvatar;
+
+// ══════════════════════════════════════════════════════════
 //  CHATS
 // ══════════════════════════════════════════════════════════
 
@@ -455,6 +1590,19 @@ async function startNewChat() {
 }
 
 async function loadChat(chatId) {
+    state.currentGroupId = null;
+    state.currentGroupChatId = null;
+    const speakerContainer = $('#group-speaker-container');
+    if (speakerContainer) speakerContainer.style.display = 'none';
+    const groupChatTitle = $('#group-chat-list-title');
+    if (groupChatTitle) groupChatTitle.style.display = 'none';
+    const groupChatList = $('#group-chat-list');
+    if (groupChatList) groupChatList.style.display = 'none';
+    renderGroupList();
+
+    // Reset status to Online for single character
+    $('#chat-header-status').textContent = t('chat.status.online') || 'Online';
+
     // A monotonic token shared with startNewChat/deleteChat: whichever
     // call is the most recent one wins, regardless of which of several
     // in-flight requests happens to resolve last (classic out-of-order
@@ -633,6 +1781,11 @@ async function sendMessage() {
         toast(t('toast.please_wait') || 'Please wait for the current reply to finish', 'info');
         return;
     }
+
+    if (state.currentGroupId) {
+        return sendGroupMessage(text);
+    }
+
     if (!state.currentCharacterId || !state.currentChatId) return;
 
     state.sending = true;
@@ -691,7 +1844,6 @@ async function sendMessage() {
     } finally {
         state.sending = false;
         $('#btn-send').disabled = false;
-        input.focus();
     }
 }
 
@@ -922,7 +2074,33 @@ window.deleteMessage = async function (index) {
 // ══════════════════════════════════════════════════════════
 
 async function openMemoryViewer() {
-    if (!state.currentCharacterId) return;
+    if (!state.currentCharacterId && !state.currentGroupId) return;
+
+    if (state.currentGroupId) {
+        const requestGroupId = state.currentGroupId;
+        const group = state.groups.find(g => g.id === requestGroupId);
+        $('#memory-char-name').textContent = group ? group.name : 'Group';
+
+        const [memory, personas] = await Promise.all([
+            api('GET', `/api/groups/${requestGroupId}/memory`),
+            api('GET', '/api/personas')
+        ]);
+        if (state.currentGroupId !== requestGroupId) return;
+
+        if (Array.isArray(personas)) {
+            state.personas = personas;
+        }
+        state.memory = memory || { facts: [], summaries: [], importantEvents: [], personaId: null };
+        if (group && group.activePersonaId) {
+            state.memory.personaId = group.activePersonaId;
+        } else if (!state.memory.personaId && state.personas.length > 0) {
+            state.memory.personaId = state.personas[0].id;
+        }
+        renderMemory();
+        openModal('modal-memory');
+        closeSidebarOnMobile();
+        return;
+    }
 
     const requestCharacterId = state.currentCharacterId; // capture before the await
     const char = state.characters.find(c => c.id === state.currentCharacterId);
@@ -1015,9 +2193,14 @@ function renderPersonaSelector() {
             if (state.memory) {
                 state.memory.personaId = id;
                 renderPersonaSelector();
-                const currentChat = state.chats.find(c => c.id === state.currentChatId);
-                if (currentChat && currentChat.messages) {
-                    renderMessages(currentChat.messages);
+                if (state.currentGroupId) {
+                    const group = state.groups.find(g => g.id === state.currentGroupId);
+                    if (group) group.activePersonaId = id;
+                } else {
+                    const currentChat = state.chats.find(c => c.id === state.currentChatId);
+                    if (currentChat && currentChat.messages) {
+                        renderMessages(currentChat.messages);
+                    }
                 }
             }
         });
@@ -1079,6 +2262,20 @@ function addMemoryEvent() {
 }
 
 async function saveMemory() {
+    if (state.currentGroupId) {
+        if (!state.memory) return;
+        const requestGroupId = state.currentGroupId;
+        await api('PUT', `/api/groups/${requestGroupId}/memory`, state.memory);
+        if (state.currentGroupId !== requestGroupId) return;
+        const group = state.groups.find(g => g.id === requestGroupId);
+        if (group && state.memory.personaId) {
+            group.activePersonaId = state.memory.personaId;
+        }
+        toast(t('toast.group_memory_saved') || 'Memori grup disimpan!', 'success');
+        closeModal('modal-memory');
+        return;
+    }
+
     if (!state.currentCharacterId || !state.memory) return;
     const requestCharacterId = state.currentCharacterId; // capture before the await
     await api('PUT', `/api/memory/${requestCharacterId}`, state.memory);
@@ -1088,6 +2285,45 @@ async function saveMemory() {
 }
 
 async function summarizeMemory() {
+    if (state.currentGroupId) {
+        if (!state.currentGroupChatId) {
+            toast(t('toast.select_chat_first') || 'Pilih sesi chat terlebih dahulu', 'error');
+            return;
+        }
+        const requestGroupId = state.currentGroupId;
+        const btn = $('#btn-summarize-memory');
+        btn.disabled = true;
+        btn.innerHTML = '<span class="spinner"></span> ' + (t('btn.saving') || 'Menyimpan...');
+
+        try {
+            const result = await api('POST', `/api/memory/${requestGroupId}/summarize`, {
+                chatId: state.currentGroupChatId,
+                isGroup: true
+            });
+            if (state.currentGroupId !== requestGroupId) return;
+
+            if (result.error) {
+                toast(result.error, 'error');
+            } else {
+                state.memory = result.memory;
+                renderMemory();
+                if (result.warning) {
+                    toast(result.warning, 'warning');
+                } else {
+                    toast(t('toast.memory_summarized') || 'Memori berhasil diringkas!', 'success');
+                }
+            }
+        } catch (err) {
+            if (state.currentGroupId === requestGroupId) {
+                toast(`Error: ${err.message}`, 'error');
+            }
+        } finally {
+            btn.disabled = false;
+            btn.innerHTML = t('memory.btn_ai_summary') || '🤖 AI Summarize Chat';
+        }
+        return;
+    }
+
     if (!state.currentCharacterId || !state.currentChatId) {
         toast(t('toast.select_chat_first'), 'error');
         return;
@@ -1246,15 +2482,79 @@ function bindEvents() {
     $('#pinterest-next-btn').addEventListener('click', () => stepPinterestResult(1));
     $('#pinterest-use-btn').addEventListener('click', usePinterestImage);
     $('#btn-edit-character').addEventListener('click', () => {
-        if (state.currentCharacterId) openCharacterEditor(state.currentCharacterId);
+        if (state.currentGroupId) {
+            openEditGroupModal(state.currentGroupId);
+        } else if (state.currentCharacterId) {
+            openCharacterEditor(state.currentCharacterId);
+        }
     });
 
     // Chat
-    $('#btn-new-chat').addEventListener('click', startNewChat);
+    $('#btn-new-chat').addEventListener('click', () => {
+        if (state.currentGroupId) {
+            startNewGroupChat();
+        } else {
+            startNewChat();
+        }
+    });
     $('#chat-form').addEventListener('submit', (e) => {
         e.preventDefault();
         sendMessage();
     });
+
+    // Group Search & Avatar
+    const groupSearchInput = $('#group-search-input');
+    if (groupSearchInput) {
+        groupSearchInput.addEventListener('input', (e) => searchGroups(e.target.value));
+    }
+    const groupAvatarPreview = $('#group-avatar-preview');
+    if (groupAvatarPreview) {
+        groupAvatarPreview.addEventListener('click', () => {
+            $('#group-avatar-file').click();
+        });
+    }
+    const groupAvatarInput = $('#group-avatar-file');
+    if (groupAvatarInput) {
+        groupAvatarInput.addEventListener('change', handleGroupAvatarUpload);
+    }
+    const groupAvatarRemoveBtn = $('#group-avatar-remove-btn');
+    if (groupAvatarRemoveBtn) {
+        groupAvatarRemoveBtn.addEventListener('click', (e) => {
+            e.stopPropagation();
+            removeGroupAvatar();
+        });
+    }
+
+    // Group Pinterest avatar picker
+    const groupPinterestToggle = $('#group-avatar-pinterest-toggle');
+    if (groupPinterestToggle) {
+        groupPinterestToggle.addEventListener('click', toggleGroupPinterestPanel);
+    }
+    const groupPinterestSearchBtn = $('#group-pinterest-search-btn');
+    if (groupPinterestSearchBtn) {
+        groupPinterestSearchBtn.addEventListener('click', searchGroupPinterest);
+    }
+    const groupPinterestQuery = $('#group-pinterest-query');
+    if (groupPinterestQuery) {
+        groupPinterestQuery.addEventListener('keydown', (e) => {
+            if (e.key === 'Enter') {
+                e.preventDefault();
+                searchGroupPinterest();
+            }
+        });
+    }
+    const groupPinterestPrevBtn = $('#group-pinterest-prev-btn');
+    if (groupPinterestPrevBtn) {
+        groupPinterestPrevBtn.addEventListener('click', () => stepGroupPinterestResult(-1));
+    }
+    const groupPinterestNextBtn = $('#group-pinterest-next-btn');
+    if (groupPinterestNextBtn) {
+        groupPinterestNextBtn.addEventListener('click', () => stepGroupPinterestResult(1));
+    }
+    const groupPinterestUseBtn = $('#group-pinterest-use-btn');
+    if (groupPinterestUseBtn) {
+        groupPinterestUseBtn.addEventListener('click', useGroupPinterestImage);
+    }
 
     // Auto-resize textarea
     $('#chat-input').addEventListener('input', autoResizeInput);
@@ -1349,9 +2649,9 @@ function handleAvatarUpload(e) {
     }
 
     const reader = new FileReader();
-    reader.onload = function(event) {
+    reader.onload = function (event) {
         const img = new Image();
-        img.onload = function() {
+        img.onload = function () {
             const canvas = document.createElement('canvas');
             const MAX_SIZE = 256;
             let width = img.width;
@@ -1387,6 +2687,33 @@ function removeAvatar() {
     $('#char-avatar').value = '';
     $('#char-avatar-file').value = '';
     updateAvatarPreview('');
+}
+
+function handleGroupAvatarUpload(e) {
+    const file = e.target.files[0];
+    if (!file) return;
+
+    if (!file.type.startsWith('image/')) {
+        toast('Pilih file gambar (JPG, PNG, GIF, WebP)', 'error');
+        return;
+    }
+
+    if (file.size > 5 * 1024 * 1024) {
+        toast('Ukuran file maksimal 5MB', 'error');
+        return;
+    }
+
+    const reader = new FileReader();
+    reader.onload = async function (event) {
+        try {
+            const resized = await resizeImageDataUrl(event.target.result, 256);
+            $('#group-avatar').value = resized;
+            updateGroupAvatarPreview(resized);
+        } catch (err) {
+            toast('Gagal memproses gambar avatar grup', 'error');
+        }
+    };
+    reader.readAsDataURL(file);
 }
 
 // ══════════════════════════════════════════════════════════
@@ -1496,6 +2823,118 @@ async function usePinterestImage() {
     }
 }
 
+// ══════════════════════════════════════════════════════════
+//  GROUP PINTEREST AVATAR PICKER
+// ══════════════════════════════════════════════════════════
+
+function toggleGroupPinterestPanel() {
+    const panel = $('#group-pinterest-panel');
+    const btn = $('#group-avatar-pinterest-toggle');
+    if (!panel || !btn) return;
+    const isOpen = panel.style.display !== 'none';
+    panel.style.display = isOpen ? 'none' : 'block';
+    btn.classList.toggle('active', !isOpen);
+    if (!isOpen) {
+        const queryInput = $('#group-pinterest-query');
+        if (queryInput && !queryInput.value) {
+            queryInput.value = ($('#group-name').value || '').trim();
+        }
+        setTimeout(() => queryInput && queryInput.focus(), 50);
+    }
+}
+
+async function searchGroupPinterest() {
+    const queryEl = $('#group-pinterest-query');
+    const statusEl = $('#group-pinterest-status');
+    const resultsEl = $('#group-pinterest-results');
+    if (!queryEl || !statusEl || !resultsEl) return;
+
+    const query = queryEl.value.trim();
+    if (!query) {
+        statusEl.textContent = 'Masukkan kata kunci pencarian dulu ya.';
+        return;
+    }
+    if (state.groupPinterest.loading) return;
+
+    state.groupPinterest.loading = true;
+    resultsEl.style.display = 'none';
+    statusEl.textContent = 'Mencari gambar...';
+
+    try {
+        const res = await api('GET', `/api/pinterest/search?q=${encodeURIComponent(query)}`);
+        if (!res.success) {
+            statusEl.textContent = res.error || 'Gagal mencari gambar.';
+            state.groupPinterest.results = [];
+            return;
+        }
+        if (!res.data || res.data.length === 0) {
+            statusEl.textContent = `Tidak ada gambar ditemukan untuk "${query}".`;
+            state.groupPinterest.results = [];
+            return;
+        }
+        state.groupPinterest.results = res.data;
+        state.groupPinterest.index = 0;
+        statusEl.textContent = '';
+        resultsEl.style.display = 'flex';
+        renderGroupPinterestResult();
+    } catch (err) {
+        statusEl.textContent = 'Terjadi kesalahan saat menghubungi server.';
+    } finally {
+        state.groupPinterest.loading = false;
+    }
+}
+
+function renderGroupPinterestResult() {
+    const { results, index } = state.groupPinterest;
+    if (!results.length) return;
+    const item = results[index];
+    const thumbEl = $('#group-pinterest-thumb');
+    const counterEl = $('#group-pinterest-counter');
+    if (thumbEl) thumbEl.src = `/api/pinterest/image?url=${encodeURIComponent(item.thumb)}`;
+    if (counterEl) counterEl.textContent = `${index + 1} / ${results.length}`;
+}
+
+function stepGroupPinterestResult(direction) {
+    const { results } = state.groupPinterest;
+    if (!results.length) return;
+    state.groupPinterest.index = Math.max(0, Math.min(results.length - 1, state.groupPinterest.index + direction));
+    renderGroupPinterestResult();
+}
+
+async function useGroupPinterestImage() {
+    const { results, index } = state.groupPinterest;
+    if (!results.length) return;
+    const item = results[index];
+    const statusEl = $('#group-pinterest-status');
+    const useBtn = $('#group-pinterest-use-btn');
+
+    if (useBtn) useBtn.disabled = true;
+    if (statusEl) statusEl.textContent = 'Mengunduh gambar...';
+
+    try {
+        const proxyUrl = `/api/pinterest/image?url=${encodeURIComponent(item.url)}`;
+        const response = await fetch(proxyUrl);
+        if (!response.ok) throw new Error('download failed');
+        const blob = await response.blob();
+        const dataUrl = await new Promise((resolve, reject) => {
+            const reader = new FileReader();
+            reader.onload = () => resolve(reader.result);
+            reader.onerror = reject;
+            reader.readAsDataURL(blob);
+        });
+
+        const resizedDataUrl = await resizeImageDataUrl(dataUrl, 256);
+        $('#group-avatar').value = resizedDataUrl;
+        updateGroupAvatarPreview(resizedDataUrl);
+        if (statusEl) statusEl.textContent = '✅ Avatar terpasang dari Pinterest.';
+        toggleGroupPinterestPanel();
+    } catch (err) {
+        if (statusEl) statusEl.textContent = 'Gagal menggunakan gambar ini, coba gambar lain.';
+    } finally {
+        if (useBtn) useBtn.disabled = false;
+    }
+}
+
 // Shared resize helper: mirrors the sizing/quality used by manual upload
 function resizeImageDataUrl(srcDataUrl, maxSize) {
     return new Promise((resolve, reject) => {
@@ -1523,7 +2962,7 @@ function resizeImageDataUrl(srcDataUrl, maxSize) {
 //  CHAT RENAME
 // ══════════════════════════════════════════════════════════
 
-window.startRenameChat = function(chatId) {
+window.startRenameChat = function (chatId) {
     const chatItem = document.querySelector(`.chat-item[data-id="${chatId}"]`);
     if (!chatItem) return;
 
@@ -1559,7 +2998,7 @@ window.startRenameChat = function(chatId) {
     });
 };
 
-window.saveRenameChat = async function(chatId) {
+window.saveRenameChat = async function (chatId) {
     const input = document.querySelector(`.chat-item-rename-input[data-chat-id="${chatId}"]`);
     if (!input) return;
 
@@ -1588,6 +3027,6 @@ window.saveRenameChat = async function(chatId) {
     }
 };
 
-window.cancelRenameChat = function() {
+window.cancelRenameChat = function () {
     renderChatList();
 };

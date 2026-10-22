@@ -40,37 +40,88 @@
                 </div>
             </div>
 
-            <button class="btn-new-character" id="btn-new-character">
-                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                    <line x1="12" y1="5" x2="12" y2="19" />
-                    <line x1="5" y1="12" x2="19" y2="12" />
-                </svg>
-                <span data-i18n="sidebar.new_character">Karakter Baru</span>
-            </button>
-
-            <div class="sidebar-section-title" data-i18n="sidebar.characters">Karakter</div>
-            <div class="sidebar-search">
-                <svg class="sidebar-search-icon" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                    <circle cx="11" cy="11" r="8" />
-                    <line x1="21" y1="21" x2="16.65" y2="16.65" />
-                </svg>
-                <input type="text" id="character-search-input" class="sidebar-search-input"
-                    placeholder="Cari karakter…" data-i18n-placeholder="sidebar.search_characters"
-                    autocomplete="off">
-                <button class="sidebar-search-clear" id="btn-clear-char-search" title="Clear" style="display:none">
-                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                        <line x1="18" y1="6" x2="6" y2="18" />
-                        <line x1="6" y1="6" x2="18" y2="18" />
-                    </svg>
+            <!-- Sidebar Navigation Tabs -->
+            <div class="sidebar-tabs">
+                <button class="sidebar-tab active" id="tab-btn-characters" onclick="switchSidebarTab('characters')">
+                    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
+                    <span data-i18n="sidebar.tab_characters">Karakter</span>
+                </button>
+                <button class="sidebar-tab" id="tab-btn-groups" onclick="switchSidebarTab('groups')">
+                    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
+                    <span data-i18n="sidebar.tab_groups">Grup Chat</span>
                 </button>
             </div>
-            <div id="character-list" class="character-list">
-                <!-- Populated by JS -->
+
+            <!-- Panel 1: Characters & 1-on-1 Chats -->
+            <div id="sidebar-panel-characters" class="sidebar-panel active">
+                <button class="btn-new-character" id="btn-new-character">
+                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <line x1="12" y1="5" x2="12" y2="19" />
+                        <line x1="5" y1="12" x2="19" y2="12" />
+                    </svg>
+                    <span data-i18n="sidebar.new_character">Karakter Baru</span>
+                </button>
+
+                <div class="sidebar-section-title" data-i18n="sidebar.characters">Karakter</div>
+                <div class="sidebar-search">
+                    <svg class="sidebar-search-icon" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <circle cx="11" cy="11" r="8" />
+                        <line x1="21" y1="21" x2="16.65" y2="16.65" />
+                    </svg>
+                    <input type="text" id="character-search-input" class="sidebar-search-input"
+                        placeholder="Cari karakter…" data-i18n-placeholder="sidebar.search_characters"
+                        autocomplete="off">
+                    <button class="sidebar-search-clear" id="btn-clear-char-search" title="Clear" style="display:none">
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <line x1="18" y1="6" x2="6" y2="18" />
+                            <line x1="6" y1="6" x2="18" y2="18" />
+                        </svg>
+                    </button>
+                </div>
+                <div id="character-list" class="character-list">
+                    <!-- Populated by JS -->
+                </div>
+
+                <div class="sidebar-section-title" id="chat-list-title" style="display:none" data-i18n="sidebar.chat_history">Chat History</div>
+                <div id="chat-list" class="chat-list">
+                    <!-- Populated by JS -->
+                </div>
             </div>
 
-            <div class="sidebar-section-title" id="chat-list-title" style="display:none" data-i18n="sidebar.chat_history">Chat History</div>
-            <div id="chat-list" class="chat-list">
-                <!-- Populated by JS -->
+            <!-- Panel 2: Group Chats -->
+            <div id="sidebar-panel-groups" class="sidebar-panel" style="display:none;">
+                <button class="btn-new-character btn-new-group" id="btn-new-group" onclick="openNewGroupModal()">
+                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <line x1="12" y1="5" x2="12" y2="19" />
+                        <line x1="5" y1="12" x2="19" y2="12" />
+                    </svg>
+                    <span data-i18n="sidebar.new_group">Grup Baru</span>
+                </button>
+
+                <div class="sidebar-section-title" data-i18n="sidebar.groups">Daftar Grup</div>
+                <div class="sidebar-search">
+                    <svg class="sidebar-search-icon" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <circle cx="11" cy="11" r="8" />
+                        <line x1="21" y1="21" x2="16.65" y2="16.65" />
+                    </svg>
+                    <input type="text" id="group-search-input" class="sidebar-search-input"
+                        placeholder="Cari grup…" data-i18n-placeholder="sidebar.search_groups"
+                        autocomplete="off">
+                    <button class="sidebar-search-clear" id="btn-clear-group-search" title="Clear" style="display:none" onclick="clearGroupSearch()">
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <line x1="18" y1="6" x2="6" y2="18" />
+                            <line x1="6" y1="6" x2="18" y2="18" />
+                        </svg>
+                    </button>
+                </div>
+                <div id="group-list" class="group-list">
+                    <!-- Populated by JS -->
+                </div>
+
+                <div class="sidebar-section-title" id="group-chat-list-title" style="display:none;" data-i18n="sidebar.chat_history">Chat History</div>
+                <div id="group-chat-list" class="chat-list">
+                    <!-- Populated by JS -->
+                </div>
             </div>
 
             <div class="sidebar-footer">
@@ -192,6 +243,14 @@
                         <span class="typing-dot"></span>
                         <span class="typing-dot"></span>
                         <span class="typing-text" data-i18n="chat.typing">sedang mengetik...</span>
+                    </div>
+                    <div class="group-speaker-container" id="group-speaker-container" style="display:none;">
+                        <div class="speaker-chips" id="group-speaker-chips">
+                            <!-- Populated by JS -->
+                        </div>
+                        <button type="button" class="btn-take-turn" id="btn-take-turn" onclick="triggerActiveSpeakerTurn()" title="Karakter langsung berbicara menanggapi obrolan sebelumnya">
+                            <span>⚡</span> <span data-i18n="chat.take_turn">Giliran Bicara</span>
+                        </button>
                     </div>
                     <form id="chat-form" class="chat-input-form">
                         <textarea id="chat-input" placeholder="Ketik pesan..." data-i18n-placeholder="chat.input_placeholder" rows="1"></textarea>
@@ -372,6 +431,97 @@
                     <button class="btn-secondary" id="btn-summarize-memory" data-i18n="memory.btn_ai_summary">🤖 AI Summarize Chat</button>
                     <div style="flex:1"></div>
                     <button class="btn-primary" id="btn-save-memory" data-i18n="memory.btn_save">💾 Simpan Memory</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- ═══ MODAL: Group Editor ═══ -->
+    <div class="modal-overlay" id="modal-group">
+        <div class="modal modal-large">
+            <div class="modal-header">
+                <h2 id="group-modal-title" data-i18n="group_edit.title_new">👥 Buat Grup Baru</h2>
+                <button class="btn-icon modal-close" onclick="closeModal('modal-group')">
+                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <line x1="18" y1="6" x2="6" y2="18" />
+                        <line x1="6" y1="6" x2="18" y2="18" />
+                    </svg>
+                </button>
+            </div>
+            <div class="modal-body">
+                <input type="hidden" id="group-edit-id">
+
+                <div class="form-row">
+                    <div class="form-group flex-2">
+                        <label for="group-name" data-i18n="group_edit.name">📛 Nama Grup</label>
+                        <input type="text" id="group-name" placeholder="Contoh: KonoSuba Party, Tim Petualang..." data-i18n-placeholder="group_edit.name_placeholder" class="form-input">
+                    </div>
+                    <div class="form-group avatar-upload-group">
+                        <label data-i18n="group_edit.avatar">🎨 Icon / Avatar Grup</label>
+                        <div class="avatar-upload-container" id="group-avatar-upload-container">
+                            <input type="file" id="group-avatar-file" accept="image/*" class="avatar-file-input">
+                            <div class="avatar-preview" id="group-avatar-preview">
+                                <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                    <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+                                    <polyline points="17 8 12 3 7 8"/>
+                                    <line x1="12" y1="3" x2="12" y2="15"/>
+                                </svg>
+                                <span data-i18n="group_edit.avatar_upload">Upload</span>
+                            </div>
+                            <button type="button" class="avatar-remove-btn" id="group-avatar-remove-btn" style="display:none" title="Hapus avatar" onclick="removeGroupAvatar()">✕</button>
+                        </div>
+                        <input type="hidden" id="group-avatar">
+                        <button type="button" class="avatar-pinterest-toggle" id="group-avatar-pinterest-toggle" title="Cari dari Pinterest" data-i18n-title="char_edit.pinterest_toggle_title" data-i18n="char_edit.pinterest_toggle">🔎 Cari</button>
+                    </div>
+                </div>
+
+                <div class="form-group pinterest-panel" id="group-pinterest-panel" style="display:none">
+                    <label data-i18n="char_edit.pinterest_title">🔎 Cari Avatar dari Pinterest</label>
+                    <div class="pinterest-search-row">
+                        <input type="text" id="group-pinterest-query" class="form-input" placeholder="Kata kunci pencarian..." data-i18n-placeholder="char_edit.pinterest_placeholder">
+                        <button type="button" class="btn-secondary" id="group-pinterest-search-btn" data-i18n="char_edit.pinterest_search">Cari</button>
+                    </div>
+                    <div class="pinterest-results" id="group-pinterest-results" style="display:none">
+                        <div class="pinterest-thumb-wrap">
+                            <img id="group-pinterest-thumb" class="pinterest-thumb" alt="Preview">
+                        </div>
+                        <div class="pinterest-nav">
+                            <button type="button" class="btn-icon" id="group-pinterest-prev-btn" title="Sebelumnya" data-i18n-title="char_edit.pinterest_prev">‹</button>
+                            <span class="pinterest-counter" id="group-pinterest-counter">1 / 1</span>
+                            <button type="button" class="btn-icon" id="group-pinterest-next-btn" title="Selanjutnya" data-i18n-title="char_edit.pinterest_next">›</button>
+                        </div>
+                        <button type="button" class="btn-primary pinterest-use-btn" id="group-pinterest-use-btn" data-i18n="char_edit.pinterest_use">Gunakan Gambar Ini</button>
+                    </div>
+                    <span class="form-hint" id="group-pinterest-status"></span>
+                </div>
+
+                <div class="form-group">
+                    <label for="group-scenario" data-i18n="group_edit.scenario">🎭 Skenario / Setting Ruangan (Shared Topic)</label>
+                    <textarea id="group-scenario" rows="2" placeholder="Contoh: Kalian sedang berkumpul di kedai setelah menyelesaikan misi..." data-i18n-placeholder="group_edit.scenario_placeholder" class="form-input"></textarea>
+                    <div class="form-hint" data-i18n="group_edit.scenario_hint">Skenario ini akan disuntikkan ke semua karakter di dalam grup agar suasana obrolan tetap konsisten.</div>
+                </div>
+
+                <div class="form-group">
+                    <div class="form-group-header-row" style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">
+                        <label data-i18n="group_edit.members">👥 Pilih Anggota Karakter</label>
+                        <span class="selected-member-count" id="selected-member-count">0 terpilih</span>
+                    </div>
+                    <div class="sidebar-search" style="margin-bottom:10px;">
+                        <svg class="sidebar-search-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <circle cx="11" cy="11" r="8" />
+                            <line x1="21" y1="21" x2="16.65" y2="16.65" />
+                        </svg>
+                        <input type="text" id="group-modal-member-search" class="sidebar-search-input" placeholder="Cari karakter untuk ditambahkan…" oninput="filterGroupModalMembers(this.value)">
+                    </div>
+                    <div class="group-character-picker" id="group-character-picker">
+                        <!-- Populated by JS -->
+                    </div>
+                </div>
+
+                <div class="form-actions">
+                    <button type="button" class="btn-danger" id="btn-delete-group" style="display:none;" onclick="confirmDeleteGroup()" data-i18n="btn.delete">🗑️ Hapus Grup</button>
+                    <div style="flex:1"></div>
+                    <button type="button" class="btn-primary" onclick="saveGroup()" data-i18n="btn.save">💾 Simpan Grup</button>
                 </div>
             </div>
         </div>

@@ -3,6 +3,50 @@
 All notable changes to this project are documented here. Format loosely
 follows [Keep a Changelog](https://keepachangelog.com/).
 
+## [v1.6.0] — Multi-Character Group Chat System & Architecture Overhaul
+
+Major release introducing the full Multi-Character Group Chat system with perspective-aware LLM roleplay, structured group memory, multi-session group history, mobile swipe gestures, and full 12-language synchronization.
+
+### Added
+- **Multi-Character Group Chat Engine (`server.js`)**:
+  - **Perspective-Aware Group Roleplay**: Characters maintain their unique personas, understand the shared group scenario, perceive which participant spoke each message (`[SpeakerName]: Message`), and respond in first-person without hallucinating other participants' turns.
+  - **Dynamic Turn System**: Added manual turn triggers (`POST /api/group-chat/turn`) allowing any character in the group to speak without requiring a new user prompt.
+  - **Intelligent @Mention Detection**: Automatically detects `@CharacterName` mentions in user prompts and routes the turn directly to the addressed character.
+  - **Group Session Management**: Multi-session group chats stored in isolated folders (`chats/groups/<groupId>/<chatId>.json`), supporting session creation, listing, renaming, and deletion.
+  - **Dual-Tier Memory Auto-Extraction**: Conversations update both the individual character's private memory and the shared group memory simultaneously.
+- **Group Chat UI & Management (`public/index.html` / `public/app.js` / `public/styles.css`)**:
+  - **Sidebar Navigation Tabs**: Added "Characters" and "Group Chats" tabs with active indicators, clean switching, and separate search filters.
+  - **Group Creation & Editor Modal**:
+    - Group room name, scenario/setting prompt, and active persona selector.
+    - Custom group avatar with file upload (auto-scaled to 256x256 WebP) and integrated Pinterest image search/picker (`groupPinterest`).
+    - Multi-character member selection cards with real-time member counters.
+  - **Header & Session Controls**:
+    - Compact member summary badge (`<N> Anggota` / `<N> Members`) in chat header.
+    - New Chat session button (`group.new_session`) and session history list with inline rename and delete controls.
+    - Shared Group Memory button in header opening the group fact, event, summary, and persona viewer.
+  - **Interactive Speaker Turn Bar**:
+    - Compact speaker selector bar positioned above chat input with character avatar chips (`.speaker-chip`).
+    - 1-click "⚡ Take Turn" button (`.btn-take-turn`) to advance the conversation smoothly.
+- **Group Chat Message Bubble Symmetry & Mobile Gestures**:
+  - **Full Parity with Single-Character Bubbles**: Identical structure featuring avatar, sender badge, bubble container, alternate navigation, timestamps, and edit/delete action triggers.
+  - **Mobile Left-Swipe Gesture**: Added `ontouchstart` and `ontouchend` handlers to `.message-bubble-container`, allowing mobile touch users to swipe the last AI message left to reveal the regenerate button (`🔄`).
+  - **Regenerate & Alternates (`/api/group-chat/regenerate`)**: Regenerate the last character's response with loading spinner animations and alternate pagination controls (`< 1/N >`).
+  - **Full-Width Message Editing**: Refactored `editGroupMessage` to expand into `.message-edit-container` with `.message-edit-textarea` (minimum 120px) and clean Cancel / Save buttons outside the bubble, eliminating duplicate previews and HTML quote escaping bugs.
+- **Full 12-Language i18n Synchronization (`public/Lang/`)**:
+  - Added 25 new translation keys for group chat tabs, creation forms, turn controls, session management, and toast notifications.
+  - Updated connection status indicator to "Connected to Backend" across all languages.
+  - Verified 100% key parity across all 12 supported languages (`AR`, `DE`, `EN`, `ES`, `FR`, `HI`, `ID`, `JP`, `KO`, `PT`, `RU`, `ZH`) with exactly 130 keys in every dictionary.
+
+### Changed & Improved
+- **Clean Folder Architecture (`memory/`)**:
+  - Reorganized memory directories into clean subfolders: `memory/private/` for 1-on-1 character memories and `memory/groups/` for shared group memories.
+- **Mobile Viewport & Keyboard UX**:
+  - Prevented intrusive forced keyboard popups when switching to group chats or receiving LLM stream responses, ensuring the mobile keyboard only appears when explicitly tapping the text input.
+- **Turn Bar Layout Polish**:
+  - Streamlined the turn bar into clean stacked pill blocks with optimized padding (`padding: 4px 10px;`) and removed redundant text prefixes for maximized mobile usability.
+
+---
+
 ## [v1.5.5]
 
 ### Added
