@@ -61,11 +61,6 @@ function updateChatSendingUI() {
     if (takeTurnBtn) {
         takeTurnBtn.disabled = isBusy;
     }
-    $$('.message-action-btn').forEach(btn => {
-        btn.disabled = isBusy;
-        btn.style.opacity = isBusy ? '0.25' : '';
-        btn.style.pointerEvents = isBusy ? 'none' : '';
-    });
 }
 
 // Backward-compatibility getter/setter for state.sending
@@ -1259,7 +1254,6 @@ async function regenerateGroupLastMessage() {
 window.regenerateGroupLastMessage = regenerateGroupLastMessage;
 
 async function changeGroupAlternate(index, delta, messageId) {
-    if (isCurrentChatSending()) return toast(t('toast.please_wait') || 'Tunggu balasan selesai dulu ya', 'info');
     if (!state.currentGroupId || !state.currentGroupChatId) return;
     const group = await api('GET', `/api/groups/${state.currentGroupId}/chat/${state.currentGroupChatId}`);
     if (!group || !Array.isArray(group.messages)) return;
@@ -1295,7 +1289,6 @@ async function changeGroupAlternate(index, delta, messageId) {
 window.changeGroupAlternate = changeGroupAlternate;
 
 window.editGroupMessage = async function (index, messageId) {
-    if (isCurrentChatSending()) return toast(t('toast.please_wait') || 'Tunggu balasan selesai dulu ya', 'info');
     if (!state.currentGroupId || !state.currentGroupChatId) return;
 
     const requestGroupId = state.currentGroupId;
@@ -1385,7 +1378,6 @@ window.cancelEditGroupMessage = function (index, messageId) {
 };
 
 window.saveEditGroupMessage = async function (index, messageId) {
-    if (isCurrentChatSending()) return toast(t('toast.please_wait') || 'Tunggu balasan selesai dulu ya', 'info');
     const editContainer = document.getElementById(`group-edit-container-${index}`)
         || (messageId ? document.querySelector(`.message-edit-container[data-msg-id="${messageId}"]`) : null);
     const textarea = editContainer ? editContainer.querySelector('.message-edit-textarea') : document.getElementById(`group-edit-textarea-${index}`);
@@ -1437,7 +1429,6 @@ window.saveEditGroupMessage = async function (index, messageId) {
 };
 
 async function deleteGroupMessage(index, messageId) {
-    if (isCurrentChatSending()) return toast(t('toast.please_wait') || 'Tunggu balasan selesai dulu ya', 'info');
     if (!state.currentGroupChatId) return;
     if (!confirm(t('chat.confirm_delete_msg') || 'Hapus pesan ini?')) return;
     const target = messageId || index;
@@ -2121,7 +2112,6 @@ window.regenerateLastMessage = async function () {
 };
 
 window.changeAlternate = async function (msgIndex, delta, messageId) {
-    if (isCurrentChatSending()) return toast(t('toast.please_wait') || 'Tunggu balasan selesai dulu ya', 'info');
     state._alternateNavBusy = state._alternateNavBusy || new Set();
     if (state._alternateNavBusy.has(msgIndex)) return; // ignore rapid double-clicks mid-request
     state._alternateNavBusy.add(msgIndex);
@@ -2171,7 +2161,6 @@ window.changeAlternate = async function (msgIndex, delta, messageId) {
 };
 
 window.editMessage = async function (index, messageId) {
-    if (isCurrentChatSending()) return toast(t('toast.please_wait') || 'Tunggu balasan selesai dulu ya', 'info');
     const requestChatId = state.currentChatId; // capture before the await
     const chat = await api('GET', `/api/chat/${requestChatId}`);
     if (!chat || chat.error) return;
@@ -2255,7 +2244,6 @@ window.cancelEdit = function (index, messageId) {
 };
 
 window.saveEdit = async function (index, messageId) {
-    if (isCurrentChatSending()) return toast(t('toast.please_wait') || 'Tunggu balasan selesai dulu ya', 'info');
     const editContainer = document.getElementById(`edit-container-${index}`)
         || (messageId ? document.querySelector(`.message-edit-container[data-msg-id="${messageId}"]`) : null);
     const textarea = editContainer ? editContainer.querySelector('.message-edit-textarea') : document.getElementById(`edit-textarea-${index}`);
@@ -2303,7 +2291,6 @@ window.saveEdit = async function (index, messageId) {
 };
 
 window.deleteMessage = async function (index, messageId) {
-    if (isCurrentChatSending()) return toast(t('toast.please_wait') || 'Tunggu balasan selesai dulu ya', 'info');
     const confirmText = t('chat.confirm_delete_msg') || 'Hapus pesan ini dari percakapan?';
     if (!confirm(confirmText)) return;
 

@@ -10,7 +10,7 @@ Comprehensive bug fix and stability release addressing concurrency race conditio
 ### Fixed & Improved
 - **Concurrency & Race Condition Hardening (`server.js` & `public/app.js`)**:
   - **Message ID-Based Alternate Targeting**: Replaced brittle message index fallbacks in `/api/chat/regenerate` and `/api/group-chat/regenerate` with unique message ID resolution, preventing stale overwrites or array boundary errors if earlier messages are deleted while an LLM call is in-flight.
-  - **Comprehensive UI Action Lockout & Guard Checks**: Added `isCurrentChatSending()` checks across `editMessage`, `saveEdit`, `deleteMessage`, `changeAlternate`, `editGroupMessage`, `saveEditGroupMessage`, `deleteGroupMessage`, and `changeGroupAlternate`. Visually disabled both the Send button (`#btn-send`), Speaker Turn button (`#btn-take-turn`), and all bubble action buttons (`.message-action-btn`) during in-flight LLM generations.
+  - **In-Flight Message Editing & Send Lockout**: Kept message Edit and Delete actions unlocked and fully interactive during in-flight LLM generations so users can correct typos or adjust dialogue immediately without waiting. Preserved message history integrity via UUID lookup and fresh disk re-reads upon LLM completion. Only new prompt submissions (`#btn-send`) and active speaker turns (`#btn-take-turn`) are locked while an LLM stream is active.
 
 - **Markdown & Action Text Rendering Engine (`public/app.js` & `public/styles.css`)**:
   - **Code Block Pre-Protection**: Escaped code fences (```) and inline code (`) using placeholder tokens (`@@CODE_BLOCK_X@@`) prior to formatting, preventing code syntax from being altered by markdown passes.
