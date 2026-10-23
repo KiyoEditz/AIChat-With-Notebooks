@@ -370,6 +370,21 @@ app.get('/api/chat/:chatId', (req, res) => {
     if (!fp) return res.status(400).json({ error: 'Invalid chat id' });
     const chat = readJSON(fp);
     if (!chat) return res.status(404).json({ error: 'Chat not found' });
+
+    // Ensure every message has a unique ID (backward compatibility)
+    if (Array.isArray(chat.messages)) {
+        let changed = false;
+        for (const m of chat.messages) {
+            if (!m.id) {
+                m.id = uuidv4();
+                changed = true;
+            }
+        }
+        if (changed) {
+            writeJSON(fp, chat);
+        }
+    }
+
     res.json(chat);
 });
 
@@ -377,11 +392,16 @@ app.get('/api/chat/:chatId', (req, res) => {
 app.post('/api/chats', (req, res) => {
     const id = uuidv4();
     const now = new Date().toISOString();
+    const rawMessages = Array.isArray(req.body.messages) ? req.body.messages : [];
+    const messages = rawMessages.map(m => ({
+        ...m,
+        id: m.id || uuidv4()
+    }));
     const chat = {
         id,
         characterId: req.body.characterId,
         title: req.body.title || 'New Chat',
-        messages: req.body.messages || [],
+        messages,
         createdAt: now,
         updatedAt: now
     };
@@ -400,10 +420,18 @@ app.put('/api/chat/:chatId', (req, res) => {
         return res.status(400).json({ error: '"messages" must be an array' });
     }
 
+    let messages = existing.messages;
+    if (req.body.messages !== undefined) {
+        messages = req.body.messages.map(m => ({
+            ...m,
+            id: m.id || uuidv4()
+        }));
+    }
+
     const updated = {
         ...existing,
         title: req.body.title ?? existing.title,
-        messages: req.body.messages ?? existing.messages,
+        messages,
         updatedAt: new Date().toISOString()
     };
     writeJSON(fp, updated);
@@ -429,17 +457,38 @@ app.get('/api/groups', (req, res) => {
         const groups = files
             .map(f => readJSON(path.join(GROUP_CHATS_DIR, f)))
             .filter(Boolean)
-            .map(g => ({
-                id: g.id,
-                name: g.name || 'Untitled Group',
-                avatar: g.avatar || '',
-                scenario: g.scenario || '',
-                characterIds: Array.isArray(g.characterIds) ? g.characterIds : [],
-                activePersonaId: g.activePersonaId || null,
-                messageCount: (g.messages || []).length,
-                createdAt: g.createdAt,
-                updatedAt: g.updatedAt
-            }));
+            .map(g => {
+                let messageCount = 0;
+                const sessionDir = path.join(GROUP_CHATS_DIR, g.id);
+                if (fs.existsSync(sessionDir)) {
+                    try {
+                        const sFiles = fs.readdirSync(sessionDir).filter(sf => sf.endsWith('.json'));
+                        for (const sf of sFiles) {
+                            const sChat = readJSON(path.join(sessionDir, sf));
+                            if (sChat && Array.isArray(sChat.messages)) {
+                                messageCount += sChat.messages.length;
+                            }
+                        }
+                    } catch (e) {
+                        console.error('Error calculating group messageCount:', e);
+                    }
+                }
+                if (messageCount === 0 && Array.isArray(g.messages)) {
+                    messageCount = g.messages.length;
+                }
+
+                return {
+                    id: g.id,
+                    name: g.name || 'Untitled Group',
+                    avatar: g.avatar || '',
+                    scenario: g.scenario || '',
+                    characterIds: Array.isArray(g.characterIds) ? g.characterIds : [],
+                    activePersonaId: g.activePersonaId || null,
+                    messageCount,
+                    createdAt: g.createdAt,
+                    updatedAt: g.updatedAt
+                };
+            });
         groups.sort((a, b) => (b.updatedAt || '').localeCompare(a.updatedAt || ''));
         res.json(groups);
     } catch (err) {
@@ -517,6 +566,28 @@ app.put('/api/groups/:id', (req, res) => {
     const existing = readJSON(fp);
     if (!existing) return res.status(404).json({ error: 'Group not found' });
 
+    // Ensure session directory exists for this group
+    const sessionDir = path.join(GROUP_CHATS_DIR, req.params.id);
+    if (!fs.existsSync(sessionDir)) {
+        fs.mkdirSync(sessionDir, { recursive: true });
+    }
+
+    // If existing has legacy messages and sessionDir is empty, migrate them to a session
+    const sFiles = fs.readdirSync(sessionDir).filter(f => f.endsWith('.json'));
+    if (sFiles.length === 0 && Array.isArray(existing.messages) && existing.messages.length > 0) {
+        const firstChatId = uuidv4();
+        const now = new Date().toISOString();
+        const firstChat = {
+            id: firstChatId,
+            groupId: req.params.id,
+            title: 'New Chat',
+            messages: existing.messages,
+            createdAt: existing.createdAt || now,
+            updatedAt: existing.updatedAt || now
+        };
+        writeJSON(path.join(sessionDir, `${firstChatId}.json`), firstChat);
+    }
+
     const updated = {
         ...existing,
         name: typeof req.body.name === 'string' && req.body.name.trim() ? req.body.name.trim() : existing.name,
@@ -524,7 +595,8 @@ app.put('/api/groups/:id', (req, res) => {
         scenario: req.body.scenario !== undefined ? req.body.scenario : existing.scenario,
         characterIds: Array.isArray(req.body.characterIds) ? req.body.characterIds : existing.characterIds,
         activePersonaId: req.body.activePersonaId !== undefined ? req.body.activePersonaId : existing.activePersonaId,
-        messages: Array.isArray(req.body.messages) ? req.body.messages : existing.messages,
+        // Never overwrite existing messages with an empty array
+        messages: (Array.isArray(req.body.messages) && req.body.messages.length > 0) ? req.body.messages : (existing.messages || []),
         updatedAt: new Date().toISOString()
     };
     writeJSON(fp, updated);
@@ -620,6 +692,18 @@ app.get('/api/groups/:groupId/chat/:chatId', (req, res) => {
     if (!fp) return res.status(400).json({ error: 'Invalid group or chat id' });
     const chat = readJSON(fp);
     if (!chat) return res.status(404).json({ error: 'Chat session not found' });
+
+    if (Array.isArray(chat.messages)) {
+        let changed = false;
+        for (const m of chat.messages) {
+            if (!m.id) {
+                m.id = uuidv4();
+                changed = true;
+            }
+        }
+        if (changed) writeJSON(fp, chat);
+    }
+
     res.json(chat);
 });
 
@@ -648,21 +732,32 @@ app.delete('/api/groups/:groupId/chat/:chatId', (req, res) => {
 
 // Edit message in group chat session
 app.put('/api/groups/:groupId/chat/:chatId/message', (req, res) => {
-    const messageIndex = Number(req.body.messageIndex);
-    const { content } = req.body;
+    const { content, messageId } = req.body;
+    let messageIndex = req.body.messageIndex !== undefined ? Number(req.body.messageIndex) : undefined;
     const fp = safeGroupChatPath(req.params.groupId, req.params.chatId);
     if (!fp) return res.status(400).json({ error: 'Invalid group or chat id' });
     if (typeof content !== 'string') return res.status(400).json({ error: 'Content must be string' });
 
     const chat = readJSON(fp);
-    if (!chat || !Array.isArray(chat.messages) || !Number.isInteger(messageIndex) || !chat.messages[messageIndex]) {
+    if (!chat || !Array.isArray(chat.messages)) {
         return res.status(404).json({ error: 'Chat or message not found' });
     }
 
-    chat.messages[messageIndex].content = content;
-    if (chat.messages[messageIndex].alternates) {
-        delete chat.messages[messageIndex].alternates;
-        delete chat.messages[messageIndex].selectedAlternate;
+    let targetMsg;
+    if (messageId) {
+        targetMsg = chat.messages.find(m => m.id === messageId);
+    }
+    if (!targetMsg && Number.isInteger(messageIndex) && messageIndex >= 0 && messageIndex < chat.messages.length) {
+        targetMsg = chat.messages[messageIndex];
+    }
+    if (!targetMsg) {
+        return res.status(404).json({ error: 'Chat or message not found' });
+    }
+
+    targetMsg.content = content;
+    if (targetMsg.alternates) {
+        delete targetMsg.alternates;
+        delete targetMsg.selectedAlternate;
     }
     chat.updatedAt = new Date().toISOString();
     writeJSON(fp, chat);
@@ -671,12 +766,27 @@ app.put('/api/groups/:groupId/chat/:chatId/message', (req, res) => {
 
 // Delete message in group chat session
 app.delete('/api/groups/:groupId/chat/:chatId/message/:index', (req, res) => {
-    const messageIndex = Number(req.params.index);
+    const param = req.params.index;
     const fp = safeGroupChatPath(req.params.groupId, req.params.chatId);
     if (!fp) return res.status(400).json({ error: 'Invalid group or chat id' });
 
     const chat = readJSON(fp);
-    if (!chat || !Array.isArray(chat.messages) || !Number.isInteger(messageIndex) || messageIndex < 0 || messageIndex >= chat.messages.length) {
+    if (!chat || !Array.isArray(chat.messages)) {
+        return res.status(404).json({ error: 'Message not found' });
+    }
+
+    let messageIndex = -1;
+    const idIndex = chat.messages.findIndex(m => m.id === param);
+    if (idIndex !== -1) {
+        messageIndex = idIndex;
+    } else {
+        const num = Number(param);
+        if (Number.isInteger(num) && num >= 0 && num < chat.messages.length) {
+            messageIndex = num;
+        }
+    }
+
+    if (messageIndex === -1) {
         return res.status(404).json({ error: 'Message not found' });
     }
 
@@ -688,21 +798,32 @@ app.delete('/api/groups/:groupId/chat/:chatId/message/:index', (req, res) => {
 
 // Edit message in group (legacy backwards-compatibility)
 app.put('/api/groups/:groupId/message', (req, res) => {
-    const messageIndex = Number(req.body.messageIndex);
-    const { content } = req.body;
+    const { content, messageId } = req.body;
+    let messageIndex = req.body.messageIndex !== undefined ? Number(req.body.messageIndex) : undefined;
     const fp = safePath(GROUP_CHATS_DIR, req.params.groupId);
     if (!fp) return res.status(400).json({ error: 'Invalid group id' });
     if (typeof content !== 'string') return res.status(400).json({ error: 'Content must be string' });
 
     const group = readJSON(fp);
-    if (!group || !Array.isArray(group.messages) || !Number.isInteger(messageIndex) || !group.messages[messageIndex]) {
+    if (!group || !Array.isArray(group.messages)) {
         return res.status(404).json({ error: 'Group or message not found' });
     }
 
-    group.messages[messageIndex].content = content;
-    if (group.messages[messageIndex].alternates) {
-        delete group.messages[messageIndex].alternates;
-        delete group.messages[messageIndex].selectedAlternate;
+    let targetMsg;
+    if (messageId) {
+        targetMsg = group.messages.find(m => m.id === messageId);
+    }
+    if (!targetMsg && Number.isInteger(messageIndex) && messageIndex >= 0 && messageIndex < group.messages.length) {
+        targetMsg = group.messages[messageIndex];
+    }
+    if (!targetMsg) {
+        return res.status(404).json({ error: 'Group or message not found' });
+    }
+
+    targetMsg.content = content;
+    if (targetMsg.alternates) {
+        delete targetMsg.alternates;
+        delete targetMsg.selectedAlternate;
     }
     group.updatedAt = new Date().toISOString();
     writeJSON(fp, group);
@@ -711,12 +832,27 @@ app.put('/api/groups/:groupId/message', (req, res) => {
 
 // Delete message in group (legacy backwards-compatibility)
 app.delete('/api/groups/:groupId/message/:index', (req, res) => {
-    const messageIndex = Number(req.params.index);
+    const param = req.params.index;
     const fp = safePath(GROUP_CHATS_DIR, req.params.groupId);
     if (!fp) return res.status(400).json({ error: 'Invalid group id' });
 
     const group = readJSON(fp);
-    if (!group || !Array.isArray(group.messages) || !Number.isInteger(messageIndex) || messageIndex < 0 || messageIndex >= group.messages.length) {
+    if (!group || !Array.isArray(group.messages)) {
+        return res.status(404).json({ error: 'Message not found' });
+    }
+
+    let messageIndex = -1;
+    const idIndex = group.messages.findIndex(m => m.id === param);
+    if (idIndex !== -1) {
+        messageIndex = idIndex;
+    } else {
+        const num = Number(param);
+        if (Number.isInteger(num) && num >= 0 && num < group.messages.length) {
+            messageIndex = num;
+        }
+    }
+
+    if (messageIndex === -1) {
         return res.status(404).json({ error: 'Message not found' });
     }
 
@@ -1233,6 +1369,13 @@ You have access to the memories listed above. When the user shares important per
     // Add current user message
     messages.push({ role: 'user', content: userMessage });
 
+    // Save user message immediately to chat history so user can edit it while LLM is generating
+    const now = new Date().toISOString();
+    const userMsgId = req.body.userMessageId || uuidv4();
+    const userMsgObj = { id: userMsgId, role: 'user', content: userMessage, timestamp: now };
+    chat.messages.push(userMsgObj);
+    writeJSON(chatFp, chat);
+
     // ── Call llama-server (with retry) ──
     try {
         const endpoint = `${baseUrl.replace(/\/$/, '')}/v1/chat/completions`;
@@ -1256,6 +1399,14 @@ You have access to the memories listed above. When the user shares important per
             const errText = await response.text();
             const cleanError = parseErrorResponse(response.status, errText);
             console.error(`LLM API error ${response.status}: ${cleanError}`);
+            // Clean up unresponded user message on API error
+            try {
+                const freshChat = readJSON(chatFp);
+                if (freshChat && Array.isArray(freshChat.messages)) {
+                    freshChat.messages = freshChat.messages.filter(m => m.id !== userMsgId);
+                    writeJSON(chatFp, freshChat);
+                }
+            } catch {}
             return res.status(502).json({ error: cleanError });
         }
 
@@ -1266,40 +1417,50 @@ You have access to the memories listed above. When the user shares important per
         console.log(`📥 Response received (${assistantContent.length} chars)`);
 
         // ── Save messages to chat history ──
-        // Re-read the chat fresh from disk here (rather than reusing the copy
-        // loaded before the 5-120s LLM call) so we don't clobber an edit or
-        // regenerate that happened on this chat while we were waiting (C5).
-        const now = new Date().toISOString();
+        // Re-read the chat fresh from disk so edits made while waiting are preserved
+        const freshNow = new Date().toISOString();
         const freshChat = readJSON(chatFp) || chat;
         if (!Array.isArray(freshChat.messages)) freshChat.messages = [];
 
-        freshChat.messages.push({ role: 'user', content: userMessage, timestamp: now });
-        freshChat.messages.push({ role: 'assistant', content: assistantContent, timestamp: now });
+        // Ensure user message exists in freshChat
+        if (!freshChat.messages.some(m => m.id === userMsgId)) {
+            freshChat.messages.push(userMsgObj);
+        }
+
+        const assistantMsgId = uuidv4();
+        freshChat.messages.push({ id: assistantMsgId, role: 'assistant', content: assistantContent, timestamp: freshNow });
 
         // Auto-set chat title from first user message
         if (freshChat.messages.length <= 2) {
             freshChat.title = userMessage.substring(0, 60) + (userMessage.length > 60 ? '…' : '');
         }
 
-        freshChat.updatedAt = now;
+        freshChat.updatedAt = freshNow;
         writeJSON(chatFp, freshChat);
 
         // ── Auto-extract memory after every exchange ──
-        // Note: intentionally NOT passing the `memory` object loaded at the
-        // top of this handler — it was read before the 5-120s LLM call, so
-        // by now it may be stale (see autoExtractMemory's own fresh re-read,
-        // C6). The function reads its own up-to-date copy right before it
-        // decides what to write.
         autoExtractMemory(memFp, userMessage, assistantContent);
 
         res.json({
             content: assistantContent,
             chatId: freshChat.id,
+            messageId: assistantMsgId,
+            userMessageId: userMsgId,
             messageIndex: freshChat.messages.length - 1
         });
 
     } catch (err) {
         console.error('Fetch error:', err);
+        // Clean up unresponded user message so there is no phantom message
+        try {
+            const freshChat = readJSON(chatFp);
+            if (freshChat && Array.isArray(freshChat.messages)) {
+                freshChat.messages = freshChat.messages.filter(m => m.id !== userMsgId);
+                writeJSON(chatFp, freshChat);
+            }
+        } catch (cleanupErr) {
+            console.error('Error cleaning up failed user message:', cleanupErr);
+        }
         const msg = err.name === 'AbortError'
             ? 'Request timed out setelah 120 detik. Model Colab mungkin overloaded. Coba kirim pesan yang lebih pendek atau tunggu 1 menit.'
             : `Connection failed: ${err.message}. Cek BASE_URL dan pastikan Colab masih running.`;
@@ -1348,6 +1509,11 @@ app.post('/api/chat/regenerate', async (req, res) => {
     if (lastMsg.role !== 'assistant') {
         return res.status(400).json({ error: 'Last message is not from assistant' });
     }
+    if (!lastMsg.id) {
+        lastMsg.id = uuidv4();
+        writeJSON(chatFp, chat);
+    }
+    const targetMsgId = req.body.messageId || lastMsg.id;
 
     let systemParts = [];
     let genderStr = char.gender ? ` You are a ${char.gender}.` : '';
@@ -1399,22 +1565,36 @@ app.post('/api/chat/regenerate', async (req, res) => {
         const rawContent = data.choices?.[0]?.message?.content || 'No response from model.';
         const assistantContent = cleanAssistantResponse(rawContent);
 
-        // Re-read the chat fresh from disk (rather than reusing the copy
-        // loaded before the 5-120s LLM call) so a concurrent edit/send isn't
-        // clobbered (C5). We target the same message index that was the last
-        // assistant message when this request started.
-        const targetIndex = chat.messages.length - 1;
+        // Re-read the chat fresh from disk so concurrent edit/deletes aren't clobbered
         const freshChat = readJSON(chatFp) || chat;
-        const targetMsg = (freshChat.messages || [])[targetIndex];
+        if (!Array.isArray(freshChat.messages)) freshChat.messages = [];
 
-        // Fall back to the in-memory message if the chat changed shape underneath us
-        const msgToUpdate = (targetMsg && targetMsg.role === 'assistant') ? targetMsg : lastMsg;
+        // Locate message to update by unique message ID
+        let targetIndex = freshChat.messages.findIndex(m => m.id === targetMsgId);
+        let msgToUpdate = targetIndex !== -1 ? freshChat.messages[targetIndex] : null;
+
+        // Fall back to the last assistant message if not found by ID
+        if (!msgToUpdate) {
+            for (let i = freshChat.messages.length - 1; i >= 0; i--) {
+                if (freshChat.messages[i].role === 'assistant') {
+                    targetIndex = i;
+                    msgToUpdate = freshChat.messages[i];
+                    break;
+                }
+            }
+        }
+
+        if (!msgToUpdate) {
+            return res.status(404).json({ error: 'Message to regenerate not found' });
+        }
 
         if (!msgToUpdate.alternates) {
             msgToUpdate.alternates = [msgToUpdate.content];
         }
         msgToUpdate.alternates.push(assistantContent);
         msgToUpdate.selectedAlternate = msgToUpdate.alternates.length - 1;
+        msgToUpdate.content = assistantContent;
+        msgToUpdate.timestamp = new Date().toISOString();
         freshChat.updatedAt = new Date().toISOString();
         writeJSON(chatFp, freshChat);
 
@@ -1423,6 +1603,7 @@ app.post('/api/chat/regenerate', async (req, res) => {
             alternates: msgToUpdate.alternates,
             selectedAlternate: msgToUpdate.selectedAlternate,
             chatId: freshChat.id,
+            messageId: msgToUpdate.id,
             messageIndex: targetIndex
         });
     } catch (err) {
@@ -1433,20 +1614,33 @@ app.post('/api/chat/regenerate', async (req, res) => {
 
 // Set selected alternate
 app.put('/api/chat/:chatId/alternate', (req, res) => {
-    const messageIndex = Number(req.body.messageIndex);
-    const { selectedAlternate } = req.body;
+    const { messageId, selectedAlternate } = req.body;
+    let messageIndex = req.body.messageIndex !== undefined ? Number(req.body.messageIndex) : undefined;
     const fp = safePath(PRIVATE_CHATS_DIR, req.params.chatId);
     if (!fp) return res.status(400).json({ error: 'Invalid chat id' });
     const chat = readJSON(fp);
-    if (!chat || !Array.isArray(chat.messages) || !Number.isInteger(messageIndex) ||
-        messageIndex < 0 || !chat.messages[messageIndex]) {
+    if (!chat || !Array.isArray(chat.messages)) {
         return res.status(404).json({ error: 'Not found' });
     }
     if (!Number.isInteger(selectedAlternate) || selectedAlternate < 0) {
         return res.status(400).json({ error: 'selectedAlternate must be a non-negative integer' });
     }
 
-    chat.messages[messageIndex].selectedAlternate = selectedAlternate;
+    let targetMsg;
+    if (messageId) {
+        targetMsg = chat.messages.find(m => m.id === messageId);
+    }
+    if (!targetMsg && Number.isInteger(messageIndex) && messageIndex >= 0 && messageIndex < chat.messages.length) {
+        targetMsg = chat.messages[messageIndex];
+    }
+    if (!targetMsg) {
+        return res.status(404).json({ error: 'Message not found' });
+    }
+
+    targetMsg.selectedAlternate = selectedAlternate;
+    if (Array.isArray(targetMsg.alternates) && targetMsg.alternates[selectedAlternate] !== undefined) {
+        targetMsg.content = targetMsg.alternates[selectedAlternate];
+    }
     writeJSON(fp, chat);
     res.json({ ok: true });
 });
@@ -1456,8 +1650,8 @@ app.put('/api/chat/:chatId/alternate', (req, res) => {
 // ══════════════════════════════════════════════════════════════
 
 app.put('/api/chat/:chatId/message', (req, res) => {
-    const messageIndex = Number(req.body.messageIndex);
-    const { content } = req.body;
+    const { content, messageId } = req.body;
+    let messageIndex = req.body.messageIndex !== undefined ? Number(req.body.messageIndex) : undefined;
     const fp = safePath(PRIVATE_CHATS_DIR, req.params.chatId);
     if (!fp) return res.status(400).json({ error: 'Invalid chat id' });
     if (typeof content !== 'string') {
@@ -1465,18 +1659,28 @@ app.put('/api/chat/:chatId/message', (req, res) => {
     }
     const chat = readJSON(fp);
 
-    if (!chat || !Array.isArray(chat.messages) || !Number.isInteger(messageIndex) ||
-        messageIndex < 0 || !chat.messages[messageIndex]) {
+    if (!chat || !Array.isArray(chat.messages)) {
+        return res.status(404).json({ error: 'Chat or message not found' });
+    }
+
+    let targetMsg;
+    if (messageId) {
+        targetMsg = chat.messages.find(m => m.id === messageId);
+    }
+    if (!targetMsg && Number.isInteger(messageIndex) && messageIndex >= 0 && messageIndex < chat.messages.length) {
+        targetMsg = chat.messages[messageIndex];
+    }
+    if (!targetMsg) {
         return res.status(404).json({ error: 'Chat or message not found' });
     }
 
     // Update the specific message
-    chat.messages[messageIndex].content = content;
+    targetMsg.content = content;
 
     // Also clear alternates for this message since it was manually edited
-    if (chat.messages[messageIndex].alternates) {
-        delete chat.messages[messageIndex].alternates;
-        delete chat.messages[messageIndex].selectedAlternate;
+    if (targetMsg.alternates) {
+        delete targetMsg.alternates;
+        delete targetMsg.selectedAlternate;
     }
 
     chat.updatedAt = new Date().toISOString();
@@ -1490,13 +1694,27 @@ app.put('/api/chat/:chatId/message', (req, res) => {
 // ══════════════════════════════════════════════════════════════
 
 app.delete('/api/chat/:chatId/message/:index', (req, res) => {
-    const messageIndex = Number(req.params.index);
+    const param = req.params.index;
     const fp = safePath(PRIVATE_CHATS_DIR, req.params.chatId);
     if (!fp) return res.status(400).json({ error: 'Invalid chat id' });
 
     const chat = readJSON(fp);
-    if (!chat || !Array.isArray(chat.messages) || !Number.isInteger(messageIndex) ||
-        messageIndex < 0 || messageIndex >= chat.messages.length) {
+    if (!chat || !Array.isArray(chat.messages)) {
+        return res.status(404).json({ error: 'Message not found' });
+    }
+
+    let messageIndex = -1;
+    const idIndex = chat.messages.findIndex(m => m.id === param);
+    if (idIndex !== -1) {
+        messageIndex = idIndex;
+    } else {
+        const num = Number(param);
+        if (Number.isInteger(num) && num >= 0 && num < chat.messages.length) {
+            messageIndex = num;
+        }
+    }
+
+    if (messageIndex === -1) {
         return res.status(404).json({ error: 'Message not found' });
     }
 
@@ -1621,25 +1839,52 @@ app.post('/api/memory/:characterId/summarize', async (req, res) => {
     // (potentially hundreds of turns) can exceed the model's context window.
     const MAX_SUMMARIZE_MESSAGES = 40;
     const messagesForSummary = chat.messages.slice(-MAX_SUMMARIZE_MESSAGES);
+
+    let userPersonaName = 'User';
+    if (isGroup) {
+        const groupFp = safePath(GROUP_CHATS_DIR, characterId);
+        const group = groupFp ? readJSON(groupFp) : null;
+        const personas = getPersonas();
+        const personaId = (group && group.activePersonaId);
+        if (personaId) {
+            const found = personas.find(p => String(p.id) === String(personaId));
+            if (found && found.name) userPersonaName = found.name;
+        } else if (personas[0] && personas[0].name) {
+            userPersonaName = personas[0].name;
+        }
+    }
+
     const conversationText = messagesForSummary.map(m => {
-        const sender = m.senderName || (m.role === 'user' ? 'User' : 'Character');
+        let sender = m.senderName;
+        if (!sender) {
+            const isUser = m.senderType === 'user' || m.role === 'user';
+            sender = isUser ? `${userPersonaName} (User)` : 'Character';
+        } else if (m.senderType === 'user' || m.role === 'user') {
+            sender = `${m.senderName} (User)`;
+        }
         return `${sender}: ${m.content}`;
     }).join('\n');
 
-    try {
-        const endpoint = `${baseUrl.replace(/\/$/, '')}/v1/chat/completions`;
-        const response = await fetchWithRetry(endpoint, {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json',
-                'Authorization': `Bearer ${apiKey}`
-            },
-            body: JSON.stringify({
-                model: modelName,
-                messages: [
-                    {
-                        role: 'system',
-                        content: `You are a silent data-extraction tool, not a roleplay character. Ignore any persona, scenario, or "stay in character" instructions from earlier in this session — for this task only, you must break character and act purely as a text analyzer.
+    const systemPrompt = isGroup
+        ? `You are a silent data-extraction tool, not a roleplay character. Ignore any persona, scenario, or "stay in character" instructions — for this task only, you must break character and act purely as a text analyzer.
+
+Analyze the group conversation transcript below and extract:
+1. KEY_FACTS: Important facts about the user and the group members/characters (preferences, habits, personal details, fears, relationships, etc.). Always explicitly mention who the fact belongs to by name (e.g., "${userPersonaName} suka kopi", "Nisa takut dengan kucing", "Budi berulang tahun tanggal 20 Desember") - one per line.
+2. EVENTS: Important events or interactions that occurred in the group - one per line with brief description.
+3. SUMMARY: A 2-3 sentence summary of this group conversation.
+
+Respond with PLAIN TEXT ONLY — no markdown bold/asterisks, no code fences, no commentary, no in-character dialogue. Use exactly this format, with each label on its own line immediately followed by its content:
+KEY_FACTS:
+- fact1
+- fact2
+EVENTS:
+- event1
+- event2
+SUMMARY:
+summary text here
+
+If there are no facts or events worth noting, write "- none" under that label instead of omitting it. Always include all three labels.`
+        : `You are a silent data-extraction tool, not a roleplay character. Ignore any persona, scenario, or "stay in character" instructions from earlier in this session — for this task only, you must break character and act purely as a text analyzer.
 
 Analyze the conversation transcript below and extract:
 1. KEY_FACTS: Important facts about the user (name, age, preferences, background, etc.) - one per line
@@ -1656,7 +1901,22 @@ EVENTS:
 SUMMARY:
 summary text here
 
-If there are no facts or events worth noting, write "- none" under that label instead of omitting it. Always include all three labels.`
+If there are no facts or events worth noting, write "- none" under that label instead of omitting it. Always include all three labels.`;
+
+    try {
+        const endpoint = `${baseUrl.replace(/\/$/, '')}/v1/chat/completions`;
+        const response = await fetchWithRetry(endpoint, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${apiKey}`
+            },
+            body: JSON.stringify({
+                model: modelName,
+                messages: [
+                    {
+                        role: 'system',
+                        content: systemPrompt
                     },
                     { role: 'user', content: conversationText }
                 ],
@@ -1787,10 +2047,25 @@ function resolveGroupSession(groupId, chatId) {
 
     let activeChatId = chatId;
     if (!activeChatId) {
-        let files = fs.readdirSync(sessionDir).filter(f => f.endsWith('.json'));
+        const files = fs.readdirSync(sessionDir).filter(f => f.endsWith('.json'));
         if (files.length > 0) {
-            files.sort().reverse();
-            activeChatId = files[0].replace('.json', '');
+            const sessions = files
+                .map(f => {
+                    const data = readJSON(path.join(sessionDir, f));
+                    if (!data) return null;
+                    return {
+                        id: data.id || f.replace('.json', ''),
+                        updatedAt: data.updatedAt || data.createdAt || ''
+                    };
+                })
+                .filter(Boolean);
+
+            if (sessions.length > 0) {
+                sessions.sort((a, b) => (b.updatedAt || '').localeCompare(a.updatedAt || ''));
+                activeChatId = sessions[0].id;
+            } else {
+                activeChatId = files[0].replace('.json', '');
+            }
         } else {
             activeChatId = uuidv4();
             const now = new Date().toISOString();
@@ -1952,13 +2227,17 @@ async function callGroupCharacterLLM({ group, messages, targetCharacterId, memFp
     let assistantContent = cleanAssistantResponse(rawContent);
 
     // Strip leading name prefix if hallucinated
-    const prefixRegex = new RegExp(`^(\\[?${char.name}\\]?:?\\s*)+`, 'i');
+    const escapedCharName = (char.name || '').replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const prefixRegex = new RegExp(`^(\\[?${escapedCharName}\\]?:?\\s*)+`, 'i');
     assistantContent = assistantContent.replace(prefixRegex, '').trim();
 
-    // Auto extract memory for this character and group
-    autoExtractMemory(memFp, userPromptContext || assistantContent, assistantContent);
-    if (groupMemFp) {
-        autoExtractMemory(groupMemFp, userPromptContext || assistantContent, assistantContent);
+    // Auto extract user preferences ONLY when there is an actual user message (never fall back to assistantContent)
+    const isRealUserMessage = userPromptContext && userPromptContext !== 'Turn continuation' && userPromptContext !== 'Regenerate response';
+    if (isRealUserMessage) {
+        autoExtractMemory(memFp, userPromptContext, assistantContent);
+        if (groupMemFp) {
+            autoExtractMemory(groupMemFp, userPromptContext, assistantContent);
+        }
     }
 
     return {
@@ -1997,10 +2276,11 @@ app.post('/api/group-chat/send', async (req, res) => {
         userName = personas[0].name;
     }
 
-    // Append user message
+    // Append user message and write to disk so user can edit while LLM is thinking
     const now = new Date().toISOString();
+    const userMsgId = req.body.userMessageId || uuidv4();
     const userMsgObj = {
-        id: uuidv4(),
+        id: userMsgId,
         senderType: 'user',
         senderId: 'user',
         senderName: userName,
@@ -2008,6 +2288,7 @@ app.post('/api/group-chat/send', async (req, res) => {
         timestamp: now
     };
     chat.messages.push(userMsgObj);
+    writeJSON(chatFp, chat);
 
     try {
         const { character, content } = await callGroupCharacterLLM({
@@ -2022,7 +2303,7 @@ app.post('/api/group-chat/send', async (req, res) => {
         const freshChat = readJSON(chatFp) || chat;
         if (!Array.isArray(freshChat.messages)) freshChat.messages = [];
 
-        if (!freshChat.messages.some(m => m.id === userMsgObj.id)) {
+        if (!freshChat.messages.some(m => m.id === userMsgId)) {
             freshChat.messages.push(userMsgObj);
         }
 
@@ -2036,6 +2317,13 @@ app.post('/api/group-chat/send', async (req, res) => {
             timestamp: new Date().toISOString()
         };
         freshChat.messages.push(replyMsg);
+
+        // Auto-set chat session title from first user message if default
+        const isDefaultTitle = !freshChat.title || freshChat.title === 'New Chat' || freshChat.title === 'New Session' || freshChat.title === 'Untitled Chat';
+        if (isDefaultTitle && freshChat.messages.length <= 2) {
+            freshChat.title = userMessage.substring(0, 60) + (userMessage.length > 60 ? '…' : '');
+        }
+
         freshChat.updatedAt = new Date().toISOString();
         writeJSON(chatFp, freshChat);
 
@@ -2048,12 +2336,21 @@ app.post('/api/group-chat/send', async (req, res) => {
             userMessage: userMsgObj,
             replyMessage: replyMsg,
             groupId: freshGroup.id,
-            chatId: activeChatId
+            chatId: activeChatId,
+            title: freshChat.title
         });
     } catch (err) {
         console.error('Group chat error:', err);
-        writeJSON(chatFp, chat);
-        res.status(500).json({ error: err.message, userMessage: userMsgObj });
+        try {
+            const freshChat = readJSON(chatFp);
+            if (freshChat && Array.isArray(freshChat.messages)) {
+                freshChat.messages = freshChat.messages.filter(m => m.id !== userMsgId);
+                writeJSON(chatFp, freshChat);
+            }
+        } catch (cleanupErr) {
+            console.error('Error cleaning up group message:', cleanupErr);
+        }
+        res.status(500).json({ error: err.message });
     }
 });
 
@@ -2138,6 +2435,11 @@ app.post('/api/group-chat/regenerate', async (req, res) => {
     if (!lastMsg || lastMsg.senderType !== 'character') {
         return res.status(400).json({ error: 'Last message is not from a character' });
     }
+    if (!lastMsg.id) {
+        lastMsg.id = uuidv4();
+        writeJSON(chatFp, chat);
+    }
+    const targetMsgId = req.body.messageId || lastMsg.id;
 
     const targetCharacterId = lastMsg.senderId;
     const memFp = safePath(PRIVATE_MEMORY_DIR, targetCharacterId);
@@ -2155,7 +2457,21 @@ app.post('/api/group-chat/regenerate', async (req, res) => {
         });
 
         const freshChat = readJSON(chatFp) || chat;
-        const msgToUpdate = freshChat.messages[lastIndex];
+        if (!Array.isArray(freshChat.messages)) freshChat.messages = [];
+
+        let targetIndex = freshChat.messages.findIndex(m => m.id === targetMsgId);
+        let msgToUpdate = targetIndex !== -1 ? freshChat.messages[targetIndex] : null;
+
+        if (!msgToUpdate) {
+            for (let i = freshChat.messages.length - 1; i >= 0; i--) {
+                if (freshChat.messages[i].senderType === 'character') {
+                    targetIndex = i;
+                    msgToUpdate = freshChat.messages[i];
+                    break;
+                }
+            }
+        }
+
         if (!msgToUpdate) return res.status(404).json({ error: 'Message not found' });
 
         if (!Array.isArray(msgToUpdate.alternates)) {
@@ -2180,7 +2496,8 @@ app.post('/api/group-chat/regenerate', async (req, res) => {
             selectedAlternate: msgToUpdate.selectedAlternate,
             groupId: freshGroup.id,
             chatId: activeChatId,
-            messageIndex: lastIndex
+            messageId: msgToUpdate.id,
+            messageIndex: targetIndex
         });
     } catch (err) {
         console.error('Group regenerate error:', err);
@@ -2190,20 +2507,34 @@ app.post('/api/group-chat/regenerate', async (req, res) => {
 
 // Set selected alternate in group message
 app.put('/api/groups/:groupId/alternate', (req, res) => {
-    const messageIndex = Number(req.body.messageIndex);
-    const { chatId, selectedAlternate } = req.body;
+    const { chatId, selectedAlternate, messageId } = req.body;
+    let messageIndex = req.body.messageIndex !== undefined ? Number(req.body.messageIndex) : undefined;
     const sessionInfo = resolveGroupSession(req.params.groupId, chatId);
     if (!sessionInfo) return res.status(400).json({ error: 'Invalid session' });
     const { chatFp, chat } = sessionInfo;
 
-    if (!Array.isArray(chat.messages) || !Number.isInteger(messageIndex) ||
-        messageIndex < 0 || !chat.messages[messageIndex]) {
+    if (!Array.isArray(chat.messages)) {
         return res.status(404).json({ error: 'Message not found' });
     }
     if (!Number.isInteger(selectedAlternate) || selectedAlternate < 0) {
         return res.status(400).json({ error: 'selectedAlternate must be non-negative integer' });
     }
-    chat.messages[messageIndex].selectedAlternate = selectedAlternate;
+
+    let targetMsg;
+    if (messageId) {
+        targetMsg = chat.messages.find(m => m.id === messageId);
+    }
+    if (!targetMsg && Number.isInteger(messageIndex) && messageIndex >= 0 && messageIndex < chat.messages.length) {
+        targetMsg = chat.messages[messageIndex];
+    }
+    if (!targetMsg) {
+        return res.status(404).json({ error: 'Message not found' });
+    }
+
+    targetMsg.selectedAlternate = selectedAlternate;
+    if (Array.isArray(targetMsg.alternates) && targetMsg.alternates[selectedAlternate] !== undefined) {
+        targetMsg.content = targetMsg.alternates[selectedAlternate];
+    }
     writeJSON(chatFp, chat);
     res.json({ ok: true });
 });

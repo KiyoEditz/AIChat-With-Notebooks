@@ -3,6 +3,32 @@
 All notable changes to this project are documented here. Format loosely
 follows [Keep a Changelog](https://keepachangelog.com/).
 
+## [v1.6.1] — Bug Fixes & Stability Hardening
+
+Comprehensive bug fix and stability release addressing concurrency race conditions, markdown rendering fidelity, group chat session preservation, and memory/persona synchronization.
+
+### Fixed & Improved
+- **Concurrency & Race Condition Hardening (`server.js` & `public/app.js`)**:
+  - **Message ID-Based Alternate Targeting**: Replaced brittle message index fallbacks in `/api/chat/regenerate` and `/api/group-chat/regenerate` with unique message ID resolution, preventing stale overwrites or array boundary errors if earlier messages are deleted while an LLM call is in-flight.
+  - **Comprehensive UI Action Lockout & Guard Checks**: Added `isCurrentChatSending()` checks across `editMessage`, `saveEdit`, `deleteMessage`, `changeAlternate`, `editGroupMessage`, `saveEditGroupMessage`, `deleteGroupMessage`, and `changeGroupAlternate`. Visually disabled both the Send button (`#btn-send`), Speaker Turn button (`#btn-take-turn`), and all bubble action buttons (`.message-action-btn`) during in-flight LLM generations.
+
+- **Markdown & Action Text Rendering Engine (`public/app.js` & `public/styles.css`)**:
+  - **Code Block Pre-Protection**: Escaped code fences (```) and inline code (`) using placeholder tokens (`@@CODE_BLOCK_X@@`) prior to formatting, preventing code syntax from being altered by markdown passes.
+  - **Asterisk Parsing Isolation**: Replaced naive global regexes with negative lookahead/lookbehind patterns for bold-italic (`***`), bold (`**`, `__`), and italic/action (`*`). Preserves arithmetic expressions (e.g., `2 * 3 * 4`) without accidental italicization.
+  - **Distinct Action & Dialogue Styling**: Enclosed italic action text in `<em class="action-text">` with a refined semi-transparent muted tone, clearly demarcating character narration/actions from spoken dialog (`"dialog"`).
+
+- **Group Chat Data Integrity & Session Resolution (`server.js` & `public/app.js`)**:
+  - **Session-Aware Message Counting**: Updated `GET /api/groups` to calculate message counts dynamically from session files in `chats/groups/<groupId>/` instead of reading obsolete root JSON files.
+  - **Group Edit Data Protection**: Fixed `PUT /api/groups/:id` to preserve existing group conversation history when updating room metadata (name, scenario, members, or avatar).
+  - **Deterministic Session Ordering**: Refactored `resolveGroupSession` in `server.js` to sort session files by filesystem modification time (`mtime` / `updatedAt`) descending instead of alphabetical UUID sorting, ensuring the most recently active session is always picked when `chatId` is omitted.
+  - **Auto-Titling for Group Sessions**: Group chat sessions now automatically rename from "New Chat" / "New Session" to the first 60 characters of the initial user message upon first send, matching private chat functionality.
+  - **Special Character Regex Escaping in Prefix Stripping**: Escaped regex special characters in character names inside `callGroupCharacterLLM` (`server.js`), preventing syntax errors or broken name prefix stripping for characters with brackets or parentheses (e.g., `Sakura (Maid)` or `Zero [02]`).
+
+- **Memory System & Persona Synchronization (`server.js` & `public/app.js`)**:
+  - **Draft-Safe Persona Selection**: Decoupled persona chip selection in the Memory Modal into a draft state (`state.memoryModalDraftPersonaId`). Canceling or closing the modal discards changes, preventing avatar or prompt desynchronization until "💾 Simpan Memory" is explicitly clicked.
+  - **Speaker-Aware Group Memory Extraction & AI Summarization**: Prevented AI character utterances or automatic turn continuation prompts from being misattributed as user facts in `callGroupCharacterLLM`. Rewrote group AI summarization to structure transcripts with explicit `[Speaker]: Message` attribution.
+  - **Local Message Cache & Private Chat Avatar Re-rendering**: Fixed bug where switching personas in private chat failed to update chat bubble avatars because `state.chats` lacked message arrays. Added `state.currentMessages` tracking and updated `saveMemory()` to fetch fresh chat data and re-render user avatars immediately.
+
 ## [v1.6.0] — Multi-Character Group Chat System & Architecture Overhaul
 
 Major release introducing the full Multi-Character Group Chat system with perspective-aware LLM roleplay, structured group memory, multi-session group history, mobile swipe gestures, and full 12-language synchronization.

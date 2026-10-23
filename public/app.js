@@ -9,15 +9,18 @@ let state = {
     characters: [],
     currentCharacterId: null,
     currentChatId: null,
+    currentMessages: [],
     chats: [],
     memory: null,
     personas: [],
-    sending: false,
+    sendingChats: new Set(),
     config: {},
     characterSearchQuery: '',
     pinterest: { results: [], index: 0, loading: false },
     groupPinterest: { results: [], index: 0, loading: false },
     unreadChats: new Set(),
+    unreadCharacters: new Set(),
+    unreadGroups: new Set(),
     _chatNavToken: 0, // monotonic guard against out-of-order chat navigation (C14/15/16)
     currentTab: 'characters',
     groups: [],
@@ -30,6 +33,54 @@ let state = {
     groupSearchQuery: '',
     groupModalSelectedIds: new Set()
 };
+
+function getActiveChatId() {
+    return state.currentGroupId ? state.currentGroupChatId : state.currentChatId;
+}
+
+function isChatSending(chatId) {
+    if (!chatId) return false;
+    return state.sendingChats && state.sendingChats.has(chatId);
+}
+
+function isCurrentChatSending() {
+    return isChatSending(getActiveChatId());
+}
+
+function updateChatSendingUI() {
+    const isBusy = isCurrentChatSending();
+    const typingIndicator = $('#typing-indicator');
+    const sendBtn = $('#btn-send');
+    const takeTurnBtn = $('#btn-take-turn');
+    if (typingIndicator) {
+        typingIndicator.style.display = isBusy ? 'flex' : 'none';
+    }
+    if (sendBtn) {
+        sendBtn.disabled = isBusy;
+    }
+    if (takeTurnBtn) {
+        takeTurnBtn.disabled = isBusy;
+    }
+    $$('.message-action-btn').forEach(btn => {
+        btn.disabled = isBusy;
+        btn.style.opacity = isBusy ? '0.25' : '';
+        btn.style.pointerEvents = isBusy ? 'none' : '';
+    });
+}
+
+// Backward-compatibility getter/setter for state.sending
+Object.defineProperty(state, 'sending', {
+    get() {
+        return isCurrentChatSending();
+    },
+    set(val) {
+        const id = getActiveChatId();
+        if (!id) return;
+        if (val) state.sendingChats.add(id);
+        else state.sendingChats.delete(id);
+        updateChatSendingUI();
+    }
+});
 
 window.langData = {};
 window.t = (key) => window.langData[key] || key;
@@ -253,13 +304,14 @@ function renderCharacterList() {
     }
 
     list.innerHTML = filtered.map(c => `
-        <div class="character-item ${c.id === state.currentCharacterId ? 'active' : ''}"
+        <div class="character-item ${c.id === state.currentCharacterId ? 'active' : ''}" style="position: relative;"
              data-id="${c.id}" onclick="selectCharacter('${c.id}')">
             <div class="character-item-avatar">${getAvatarInnerHtml(c.avatar, c.name)}</div>
             <div class="character-item-info">
                 <div class="character-item-name">${escapeHtml(c.name)}</div>
                 <div class="character-item-desc">${escapeHtml((c.personality || '').substring(0, 50))}</div>
             </div>
+            ${(state.unreadCharacters && state.unreadCharacters.has(c.id)) ? '<span class="chat-item-unread-dot" title="New reply" style="position: absolute; right: 12px; top: 14px;"></span>' : ''}
         </div>
     `).join('');
 }
@@ -287,6 +339,7 @@ function clearCharacterSearchAndFocus() {
 async function selectCharacter(id) {
     state.currentGroupId = null;
     state.currentGroupChatId = null;
+    if (state.unreadCharacters) state.unreadCharacters.delete(id);
     const speakerContainer = $('#group-speaker-container');
     if (speakerContainer) speakerContainer.style.display = 'none';
     const groupChatTitle = $('#group-chat-list-title');
@@ -296,6 +349,7 @@ async function selectCharacter(id) {
 
     state.currentCharacterId = id;
     state.currentChatId = null;
+    state.currentMessages = [];
     renderCharacterList();
     renderGroupList();
 
@@ -496,14 +550,16 @@ function renderGroupList() {
         const avatarHtml = g.avatar
             ? `<img src="${escapeHtml(g.avatar)}" alt="${escapeHtml(g.name)}">`
             : '👥';
+        const hasUnread = state.unreadGroups && state.unreadGroups.has(g.id);
         return `
-            <div class="group-item ${g.id === state.currentGroupId ? 'active' : ''}"
+            <div class="group-item ${g.id === state.currentGroupId ? 'active' : ''}" style="position: relative;"
                  data-id="${g.id}" onclick="selectGroup('${g.id}')">
                 <div class="group-avatar-stack">${avatarHtml}</div>
                 <div class="group-item-info">
                     <div class="group-item-name">${escapeHtml(g.name)}</div>
                     <div class="group-item-meta">${memberCount} karakter</div>
                 </div>
+                ${hasUnread ? '<span class="chat-item-unread-dot" title="New reply" style="position: absolute; right: 12px; top: 14px;"></span>' : ''}
             </div>
         `;
     }).join('');
@@ -524,10 +580,12 @@ function clearGroupSearch() {
 }
 window.clearGroupSearch = clearGroupSearch;
 
-async function selectGroup(groupId) {
+async function selectGroup(groupId, preserveChatId = null) {
     state.currentGroupId = groupId;
+    state.currentGroupChatId = preserveChatId;
     state.currentCharacterId = null;
     state.currentChatId = null;
+    if (state.unreadGroups) state.unreadGroups.delete(groupId);
     renderCharacterList();
     renderGroupList();
 
@@ -634,6 +692,7 @@ function renderGroupChatList() {
              data-id="${c.id}" onclick="loadGroupChat('${c.id}')">
             <span class="chat-item-icon">💬</span>
             <span class="chat-item-title">${escapeHtml(c.title || 'New Session')}</span>
+            ${state.unreadChats.has(c.id) ? '<span class="chat-item-unread-dot" title="New reply"></span>' : ''}
             <div class="chat-item-actions">
                 <button class="chat-item-edit" onclick="event.stopPropagation(); startRenameGroupChat('${c.id}')" title="Rename">✏️</button>
                 <button class="chat-item-delete" onclick="event.stopPropagation(); deleteGroupChat('${c.id}')" title="Delete">✕</button>
@@ -651,9 +710,11 @@ async function loadGroupChat(chatId) {
     if (myToken !== state._groupChatNavToken) return;
 
     state.currentGroupChatId = chatId;
+    state.unreadChats.delete(chatId);
     renderGroupChatList();
     renderGroupMessages(chat.messages || []);
     closeSidebarOnMobile();
+    updateChatSendingUI();
 }
 
 async function startNewGroupChat() {
@@ -666,6 +727,7 @@ async function startNewGroupChat() {
         state.currentGroupChatId = newChat.id;
         renderGroupChatList();
         renderGroupMessages([]);
+        updateChatSendingUI();
     } catch (err) {
         toast(`Error: ${err.message}`, 'error');
     }
@@ -862,9 +924,9 @@ function renderGroupMessages(messages) {
             const current = (m.selectedAlternate || 0) + 1;
             alternatesHtml = `
                 <div class="alternate-nav">
-                    <button onclick="changeGroupAlternate(${index}, -1)">&lt;</button>
+                    <button onclick="changeGroupAlternate(${index}, -1, '${m.id || ''}')">&lt;</button>
                     <span>${current}/${total}</span>
-                    <button onclick="changeGroupAlternate(${index}, 1)">&gt;</button>
+                    <button onclick="changeGroupAlternate(${index}, 1, '${m.id || ''}')">&gt;</button>
                 </div>
             `;
             const selIdx = m.selectedAlternate || 0;
@@ -875,9 +937,10 @@ function renderGroupMessages(messages) {
             ? `<button class="regenerate-btn" onclick="regenerateGroupLastMessage()" title="${t('chat.action.regenerate') || 'Regenerate'}">🔄</button>`
             : '';
         const touchEvents = isLastCharacter ? 'ontouchstart="handleTouchStart(event)" ontouchend="handleTouchEnd(event, this)"' : '';
+        const msgId = m.id || '';
 
         return `
-            <div class="message ${isUser ? 'user' : 'assistant'}" data-index="${index}">
+            <div class="message ${isUser ? 'user' : 'assistant'}" data-index="${index}" data-id="${msgId}">
                 <div class="message-avatar">${avatarHtml}</div>
                 <div style="flex:1; min-width:0;">
                     <div class="group-message-sender">
@@ -890,8 +953,8 @@ function renderGroupMessages(messages) {
                     ${alternatesHtml}
                     <div class="message-meta">
                         ${time ? `<span class="message-time">${time}</span>` : ''}
-                        <button class="message-action-btn" onclick="editGroupMessage(${index})" title="${t('chat.action.edit') || t('btn.edit') || 'Edit'}">✏️</button>
-                        <button class="message-action-btn message-delete-btn" onclick="deleteGroupMessage(${index})" title="${t('chat.action.delete') || 'Hapus'}">🗑️</button>
+                        <button class="message-action-btn" onclick="editGroupMessage(${index}, '${msgId}')" title="${t('chat.action.edit') || t('btn.edit') || 'Edit'}">✏️</button>
+                        <button class="message-action-btn message-delete-btn" onclick="deleteGroupMessage(${index}, '${msgId}')" title="${t('chat.action.delete') || 'Hapus'}">🗑️</button>
                     </div>
                 </div>
             </div>
@@ -901,7 +964,7 @@ function renderGroupMessages(messages) {
     scrollToBottom();
 }
 
-function appendGroupMessage(senderType, content, senderName, avatarData, isLastCharacter = false, senderId = null) {
+function appendGroupMessage(senderType, content, senderName, avatarData, isLastCharacter = false, senderId = null, messageId = null) {
     const container = $('#chat-messages');
     const empty = container.querySelector('.empty-chat');
     if (empty) empty.remove();
@@ -925,10 +988,12 @@ function appendGroupMessage(senderType, content, senderName, avatarData, isLastC
         ? `<button class="regenerate-btn" onclick="regenerateGroupLastMessage()" title="${t('chat.action.regenerate') || 'Regenerate'}">🔄</button>`
         : '';
     const touchEvents = isLastCharacter ? 'ontouchstart="handleTouchStart(event)" ontouchend="handleTouchEnd(event, this)"' : '';
+    const msgId = messageId || '';
 
     const div = document.createElement('div');
     div.className = `message ${isUser ? 'user' : 'assistant'}`;
     div.dataset.index = index;
+    div.dataset.id = msgId;
     div.innerHTML = `
         <div class="message-avatar">${avatarHtml}</div>
         <div style="flex:1; min-width:0;">
@@ -941,8 +1006,8 @@ function appendGroupMessage(senderType, content, senderName, avatarData, isLastC
             </div>
             <div class="message-meta">
                 <span class="message-time">${time}</span>
-                <button class="message-action-btn" onclick="editGroupMessage(${index})" title="${t('chat.action.edit') || t('btn.edit') || 'Edit'}">✏️</button>
-                <button class="message-action-btn message-delete-btn" onclick="deleteGroupMessage(${index})" title="${t('chat.action.delete') || 'Hapus'}">🗑️</button>
+                <button class="message-action-btn" onclick="editGroupMessage(${index}, '${msgId}')" title="${t('chat.action.edit') || t('btn.edit') || 'Edit'}">✏️</button>
+                <button class="message-action-btn message-delete-btn" onclick="deleteGroupMessage(${index}, '${msgId}')" title="${t('chat.action.delete') || 'Hapus'}">🗑️</button>
             </div>
         </div>
     `;
@@ -956,13 +1021,16 @@ async function sendGroupMessage(text) {
     const group = state.groups.find(g => g.id === state.currentGroupId);
     if (!group) return;
 
-    if (state.sending) {
-        toast(t('toast.please_wait') || 'Harap tunggu balasan selesai', 'info');
-        return;
-    }
-
     if (!state.currentGroupChatId) {
         await startNewGroupChat();
+    }
+
+    const requestGroupId = state.currentGroupId;
+    const requestChatId = state.currentGroupChatId;
+
+    if (isChatSending(requestChatId)) {
+        toast(t('toast.please_wait') || 'Harap tunggu balasan selesai', 'info');
+        return;
     }
 
     // Auto-detect @Mention
@@ -987,54 +1055,73 @@ async function sendGroupMessage(text) {
         renderGroupSpeakerBar(group);
     }
 
-    state.sending = true;
+    state.sendingChats.add(requestChatId);
     input.value = '';
     autoResizeInput();
 
     // Show user message immediately
+    // Show user message immediately with unique ID
     const userPersona = getActivePersona();
     const userName = (userPersona && userPersona.name) ? userPersona.name : 'User';
-    const userBubble = appendGroupMessage('user', text, userName, userPersona?.avatar);
+    const userMsgId = (typeof crypto !== 'undefined' && crypto.randomUUID) ? crypto.randomUUID() : ('grp-msg-' + Date.now() + '-' + Math.random().toString(36).substring(2, 9));
+    const userBubble = appendGroupMessage('user', text, userName, userPersona?.avatar, false, null, userMsgId);
 
-    $('#typing-indicator').style.display = 'flex';
-    $('#btn-send').disabled = true;
+    updateChatSendingUI();
 
     try {
         const result = await api('POST', '/api/group-chat/send', {
-            groupId: state.currentGroupId,
-            chatId: state.currentGroupChatId,
+            groupId: requestGroupId,
+            chatId: requestChatId,
             targetCharacterId: targetId,
-            userMessage: text
+            userMessage: text,
+            userMessageId: userMsgId
         });
 
-        $('#typing-indicator').style.display = 'none';
-
         if (result.error) {
-            if (userBubble) userBubble.remove();
-            input.value = text;
-            autoResizeInput();
+            if (state.currentGroupId === requestGroupId && state.currentGroupChatId === requestChatId) {
+                if (userBubble) userBubble.remove();
+                input.value = text;
+                autoResizeInput();
+            }
             toast(result.error, 'error');
             return;
         }
 
+        if (state.currentGroupId !== requestGroupId || state.currentGroupChatId !== requestChatId) {
+            state.unreadChats.add(requestChatId);
+            state.unreadGroups.add(requestGroupId);
+            renderGroupList();
+            if (state.currentGroupId === requestGroupId) {
+                renderGroupChatList();
+            }
+            return;
+        }
+
         // Fetch fresh group chat session messages and re-render
-        const fresh = await api('GET', `/api/groups/${state.currentGroupId}/chat/${state.currentGroupChatId}`);
+        const fresh = await api('GET', `/api/groups/${requestGroupId}/chat/${requestChatId}`);
         if (fresh && Array.isArray(fresh.messages)) {
             renderGroupMessages(fresh.messages);
-            const sChat = state.groupChats.find(c => c.id === state.currentGroupChatId);
+            const sChat = state.groupChats.find(c => c.id === requestChatId);
             if (sChat) {
+                if (fresh.title) sChat.title = fresh.title;
                 sChat.messageCount = fresh.messages.length;
                 renderGroupChatList();
             }
         } else if (result.replyMessage) {
-            appendGroupMessage('character', result.replyMessage.content, result.replyMessage.senderName, result.replyMessage.senderAvatar, true, result.replyMessage.senderId);
+            appendGroupMessage('character', result.replyMessage.content, result.replyMessage.senderName, result.replyMessage.senderAvatar, true, result.replyMessage.senderId, result.replyMessage.id);
         }
     } catch (err) {
-        $('#typing-indicator').style.display = 'none';
+        if (state.currentGroupId === requestGroupId && state.currentGroupChatId === requestChatId) {
+            if (userBubble) userBubble.remove();
+            input.value = text;
+            autoResizeInput();
+        }
         toast(`Error: ${err.message}`, 'error');
     } finally {
-        state.sending = false;
-        $('#btn-send').disabled = false;
+        state.sendingChats.delete(requestChatId);
+        if (state.currentGroupId === requestGroupId && state.currentGroupChatId === requestChatId) {
+            updateChatSendingUI();
+        }
     }
 }
 
@@ -1057,38 +1144,49 @@ window.triggerActiveSpeakerTurn = triggerActiveSpeakerTurn;
 
 async function triggerGroupTurn(targetCharacterId, replyToMessageId = null) {
     if (!state.currentGroupId) return;
-    if (state.sending) {
-        toast(t('toast.please_wait') || 'Harap tunggu balasan selesai', 'info');
-        return;
-    }
 
     if (!state.currentGroupChatId) {
         await startNewGroupChat();
     }
 
-    state.sending = true;
-    $('#typing-indicator').style.display = 'flex';
-    $('#btn-send').disabled = true;
+    const requestGroupId = state.currentGroupId;
+    const requestChatId = state.currentGroupChatId;
+
+    if (isChatSending(requestChatId)) {
+        toast(t('toast.please_wait') || 'Harap tunggu balasan selesai', 'info');
+        return;
+    }
+
+    state.sendingChats.add(requestChatId);
+    updateChatSendingUI();
 
     try {
         const result = await api('POST', '/api/group-chat/turn', {
-            groupId: state.currentGroupId,
-            chatId: state.currentGroupChatId,
+            groupId: requestGroupId,
+            chatId: requestChatId,
             targetCharacterId: targetCharacterId,
             replyToMessageId: replyToMessageId
         });
-
-        $('#typing-indicator').style.display = 'none';
 
         if (result.error) {
             toast(result.error, 'error');
             return;
         }
 
-        const fresh = await api('GET', `/api/groups/${state.currentGroupId}/chat/${state.currentGroupChatId}`);
+        if (state.currentGroupId !== requestGroupId || state.currentGroupChatId !== requestChatId) {
+            state.unreadChats.add(requestChatId);
+            state.unreadGroups.add(requestGroupId);
+            renderGroupList();
+            if (state.currentGroupId === requestGroupId) {
+                renderGroupChatList();
+            }
+            return;
+        }
+
+        const fresh = await api('GET', `/api/groups/${requestGroupId}/chat/${requestChatId}`);
         if (fresh && Array.isArray(fresh.messages)) {
             renderGroupMessages(fresh.messages);
-            const sChat = state.groupChats.find(c => c.id === state.currentGroupChatId);
+            const sChat = state.groupChats.find(c => c.id === requestChatId);
             if (sChat) {
                 sChat.messageCount = fresh.messages.length;
                 renderGroupChatList();
@@ -1097,59 +1195,88 @@ async function triggerGroupTurn(targetCharacterId, replyToMessageId = null) {
             appendGroupMessage('character', result.replyMessage.content, result.replyMessage.senderName, result.replyMessage.senderAvatar, true, result.replyMessage.senderId);
         }
     } catch (err) {
-        $('#typing-indicator').style.display = 'none';
         toast(`Error: ${err.message}`, 'error');
     } finally {
-        state.sending = false;
-        $('#btn-send').disabled = false;
+        state.sendingChats.delete(requestChatId);
+        if (state.currentGroupId === requestGroupId && state.currentGroupChatId === requestChatId) {
+            updateChatSendingUI();
+        }
     }
 }
 
 async function regenerateGroupLastMessage() {
-    if (!state.currentGroupId || !state.currentGroupChatId || state.sending) return;
+    if (!state.currentGroupId || !state.currentGroupChatId) return;
 
-    state.sending = true;
+    const requestGroupId = state.currentGroupId;
+    const requestChatId = state.currentGroupChatId;
+
+    if (isChatSending(requestChatId)) return;
+
+    const lastMsgEl = document.querySelector('#chat-messages .message:last-child');
+    const messageId = lastMsgEl?.dataset?.id;
+
+    state.sendingChats.add(requestChatId);
     const btn = document.querySelector('.regenerate-btn');
     if (btn) btn.innerHTML = '<span class="spinner"></span>';
-    const sendBtn = $('#btn-send');
-    if (sendBtn) sendBtn.disabled = true;
-    $('#typing-indicator').style.display = 'flex';
+    updateChatSendingUI();
 
     try {
         const result = await api('POST', '/api/group-chat/regenerate', {
-            groupId: state.currentGroupId,
-            chatId: state.currentGroupChatId
+            groupId: requestGroupId,
+            chatId: requestChatId,
+            messageId: messageId || undefined
         });
-
-        $('#typing-indicator').style.display = 'none';
 
         if (result.error) {
             toast(result.error, 'error');
             return;
         }
 
-        const fresh = await api('GET', `/api/groups/${state.currentGroupId}/chat/${state.currentGroupChatId}`);
+        if (state.currentGroupId !== requestGroupId || state.currentGroupChatId !== requestChatId) {
+            state.unreadChats.add(requestChatId);
+            state.unreadGroups.add(requestGroupId);
+            renderGroupList();
+            if (state.currentGroupId === requestGroupId) {
+                renderGroupChatList();
+            }
+            return;
+        }
+
+        const fresh = await api('GET', `/api/groups/${requestGroupId}/chat/${requestChatId}`);
         if (fresh && Array.isArray(fresh.messages)) {
             renderGroupMessages(fresh.messages);
         }
     } catch (err) {
-        $('#typing-indicator').style.display = 'none';
         toast(`Error: ${err.message}`, 'error');
     } finally {
-        state.sending = false;
-        if (btn) btn.innerHTML = '🔄';
-        if (sendBtn) sendBtn.disabled = false;
+        state.sendingChats.delete(requestChatId);
+        if (state.currentGroupId === requestGroupId && state.currentGroupChatId === requestChatId) {
+            if (btn) btn.innerHTML = '🔄';
+            updateChatSendingUI();
+        }
     }
 }
 window.regenerateGroupLastMessage = regenerateGroupLastMessage;
 
-async function changeGroupAlternate(index, delta) {
+async function changeGroupAlternate(index, delta, messageId) {
+    if (isCurrentChatSending()) return toast(t('toast.please_wait') || 'Tunggu balasan selesai dulu ya', 'info');
     if (!state.currentGroupId || !state.currentGroupChatId) return;
     const group = await api('GET', `/api/groups/${state.currentGroupId}/chat/${state.currentGroupChatId}`);
-    if (!group || !Array.isArray(group.messages) || !group.messages[index]) return;
+    if (!group || !Array.isArray(group.messages)) return;
 
-    const msg = group.messages[index];
-    if (!msg.alternates || msg.alternates.length <= 1) return;
+    let msg = null;
+    let actualIndex = index;
+    if (messageId) {
+        const fIdx = group.messages.findIndex(m => m.id === messageId);
+        if (fIdx !== -1) {
+            msg = group.messages[fIdx];
+            actualIndex = fIdx;
+        }
+    }
+    if (!msg && group.messages[index]) {
+        msg = group.messages[index];
+    }
+    if (!msg || !msg.alternates || msg.alternates.length <= 1) return;
 
     let newIndex = (msg.selectedAlternate || 0) + delta;
     if (newIndex < 0) newIndex = msg.alternates.length - 1;
@@ -1157,7 +1284,8 @@ async function changeGroupAlternate(index, delta) {
 
     await api('PUT', `/api/groups/${state.currentGroupId}/alternate`, {
         chatId: state.currentGroupChatId,
-        messageIndex: index,
+        messageIndex: actualIndex,
+        messageId: messageId || undefined,
         selectedAlternate: newIndex
     });
 
@@ -1166,7 +1294,8 @@ async function changeGroupAlternate(index, delta) {
 }
 window.changeGroupAlternate = changeGroupAlternate;
 
-window.editGroupMessage = async function (index) {
+window.editGroupMessage = async function (index, messageId) {
+    if (isCurrentChatSending()) return toast(t('toast.please_wait') || 'Tunggu balasan selesai dulu ya', 'info');
     if (!state.currentGroupId || !state.currentGroupChatId) return;
 
     const requestGroupId = state.currentGroupId;
@@ -1176,10 +1305,22 @@ window.editGroupMessage = async function (index) {
     if (!groupChat || !Array.isArray(groupChat.messages)) return;
     if (state.currentGroupId !== requestGroupId || state.currentGroupChatId !== requestChatId) return;
 
-    const msg = groupChat.messages[index];
+    let msg = null;
+    let actualIndex = index;
+    if (messageId) {
+        const fIdx = groupChat.messages.findIndex(m => m.id === messageId);
+        if (fIdx !== -1) {
+            msg = groupChat.messages[fIdx];
+            actualIndex = fIdx;
+        }
+    }
+    if (!msg && groupChat.messages[index]) {
+        msg = groupChat.messages[index];
+    }
     if (!msg) return;
 
-    const messageDiv = document.querySelector(`.message[data-index="${index}"]`);
+    const messageDiv = (messageId && document.querySelector(`.message[data-id="${messageId}"]`))
+        || document.querySelector(`.message[data-index="${index}"]`);
     if (!messageDiv) return;
 
     const msgEl = messageDiv.querySelector('.message-bubble-container');
@@ -1192,24 +1333,25 @@ window.editGroupMessage = async function (index) {
     if (metaEl) metaEl.style.display = 'none';
     if (alternatesEl) alternatesEl.style.display = 'none';
 
-    const existing = document.getElementById(`group-edit-container-${index}`);
+    const existing = document.getElementById(`group-edit-container-${actualIndex}`);
     if (existing) existing.remove();
 
     const editContainer = document.createElement('div');
     editContainer.className = 'message-edit-container';
-    editContainer.id = `group-edit-container-${index}`;
+    editContainer.id = `group-edit-container-${actualIndex}`;
+    editContainer.dataset.msgId = messageId || (msg.id || '');
     editContainer.innerHTML = `
-        <textarea class="message-edit-textarea" id="group-edit-textarea-${index}">${escapeHtml(originalContent)}</textarea>
+        <textarea class="message-edit-textarea" id="group-edit-textarea-${actualIndex}">${escapeHtml(originalContent)}</textarea>
         <div class="message-edit-actions">
-            <button class="btn-secondary" style="padding: 6px 12px; font-size: 0.85rem;" onclick="cancelEditGroupMessage(${index})">${t('btn.cancel') || 'Cancel'}</button>
-            <button class="btn-primary" style="padding: 6px 12px; font-size: 0.85rem;" onclick="saveEditGroupMessage(${index})">${t('btn.save') || 'Save'}</button>
+            <button class="btn-secondary" style="padding: 6px 12px; font-size: 0.85rem;" onclick="cancelEditGroupMessage(${actualIndex}, '${messageId || ''}')">${t('btn.cancel') || 'Cancel'}</button>
+            <button class="btn-primary" style="padding: 6px 12px; font-size: 0.85rem;" onclick="saveEditGroupMessage(${actualIndex}, '${messageId || ''}')">${t('btn.save') || 'Save'}</button>
         </div>
     `;
 
     msgEl.parentNode.insertBefore(editContainer, msgEl);
     messageDiv.classList.add('is-editing');
 
-    const textarea = document.getElementById(`group-edit-textarea-${index}`);
+    const textarea = document.getElementById(`group-edit-textarea-${actualIndex}`);
     const resizeTextarea = () => {
         textarea.style.height = 'auto';
         textarea.style.height = Math.max(120, textarea.scrollHeight) + 'px';
@@ -1221,11 +1363,14 @@ window.editGroupMessage = async function (index) {
     }, 0);
 };
 
-window.cancelEditGroupMessage = function (index) {
-    const editContainer = document.getElementById(`group-edit-container-${index}`);
+window.cancelEditGroupMessage = function (index, messageId) {
+    const messageDiv = (messageId && document.querySelector(`.message[data-id="${messageId}"]`))
+        || document.querySelector(`.message[data-index="${index}"]`);
+
+    const editContainer = document.getElementById(`group-edit-container-${index}`)
+        || (messageDiv && messageDiv.querySelector('.message-edit-container'));
     if (editContainer) editContainer.remove();
 
-    const messageDiv = document.querySelector(`.message[data-index="${index}"]`);
     if (!messageDiv) return;
 
     const msgEl = messageDiv.querySelector('.message-bubble-container');
@@ -1239,27 +1384,33 @@ window.cancelEditGroupMessage = function (index) {
     messageDiv.classList.remove('is-editing');
 };
 
-window.saveEditGroupMessage = async function (index) {
-    const textarea = document.getElementById(`group-edit-textarea-${index}`);
+window.saveEditGroupMessage = async function (index, messageId) {
+    if (isCurrentChatSending()) return toast(t('toast.please_wait') || 'Tunggu balasan selesai dulu ya', 'info');
+    const editContainer = document.getElementById(`group-edit-container-${index}`)
+        || (messageId ? document.querySelector(`.message-edit-container[data-msg-id="${messageId}"]`) : null);
+    const textarea = editContainer ? editContainer.querySelector('.message-edit-textarea') : document.getElementById(`group-edit-textarea-${index}`);
     if (!textarea) return;
 
     const newContent = textarea.value.trim();
-    if (!newContent) return cancelEditGroupMessage(index);
+    if (!newContent) return cancelEditGroupMessage(index, messageId);
 
     const requestGroupId = state.currentGroupId;
     const requestChatId = state.currentGroupChatId;
 
-    const btn = textarea.nextElementSibling.querySelector('.btn-primary');
+    const btn = editContainer ? editContainer.querySelector('.btn-primary') : textarea.nextElementSibling.querySelector('.btn-primary');
     if (btn) {
         btn.disabled = true;
         btn.textContent = t('btn.saving') || 'Saving...';
     }
 
     try {
-        const result = await api('PUT', `/api/groups/${requestGroupId}/chat/${requestChatId}/message`, {
+        const payload = {
             messageIndex: index,
             content: newContent
-        });
+        };
+        if (messageId) payload.messageId = messageId;
+
+        const result = await api('PUT', `/api/groups/${requestGroupId}/chat/${requestChatId}/message`, payload);
 
         if (result && result.error) {
             toast(result.error, 'error');
@@ -1285,10 +1436,13 @@ window.saveEditGroupMessage = async function (index) {
     }
 };
 
-async function deleteGroupMessage(index) {
+async function deleteGroupMessage(index, messageId) {
+    if (isCurrentChatSending()) return toast(t('toast.please_wait') || 'Tunggu balasan selesai dulu ya', 'info');
+    if (!state.currentGroupChatId) return;
     if (!confirm(t('chat.confirm_delete_msg') || 'Hapus pesan ini?')) return;
+    const target = messageId || index;
     try {
-        await api('DELETE', `/api/groups/${state.currentGroupId}/chat/${state.currentGroupChatId}/message/${index}`);
+        await api('DELETE', `/api/groups/${state.currentGroupId}/chat/${state.currentGroupChatId}/message/${target}`);
         const fresh = await api('GET', `/api/groups/${state.currentGroupId}/chat/${state.currentGroupChatId}`);
         if (fresh && Array.isArray(fresh.messages)) {
             renderGroupMessages(fresh.messages);
@@ -1448,6 +1602,9 @@ async function saveGroup() {
     };
 
     try {
+        const wasCurrentGroup = (state.currentGroupId === editId);
+        const preservedChatId = wasCurrentGroup ? state.currentGroupChatId : null;
+
         if (editId) {
             await api('PUT', `/api/groups/${editId}`, payload);
             toast(t('toast.group_updated') || 'Grup berhasil diperbarui!', 'success');
@@ -1462,7 +1619,7 @@ async function saveGroup() {
 
         const targetId = editId || (state.groups[0] ? state.groups[0].id : null);
         if (targetId) {
-            selectGroup(targetId);
+            await selectGroup(targetId, preservedChatId);
         }
     } catch (err) {
         toast(`Error saving group: ${err.message}`, 'error');
@@ -1587,6 +1744,7 @@ async function startNewChat() {
     renderMessages(chat.messages || []);
     showView('view-chat');
     closeSidebarOnMobile();
+    updateChatSendingUI();
 }
 
 async function loadChat(chatId) {
@@ -1618,6 +1776,7 @@ async function loadChat(chatId) {
     renderChatList();
     renderMessages(chat.messages || []);
     closeSidebarOnMobile();
+    updateChatSendingUI();
 }
 
 async function deleteChat(chatId) {
@@ -1636,6 +1795,7 @@ async function deleteChat(chatId) {
 
         if (state.currentChatId === chatId) {
             state.currentChatId = null;
+            state.currentMessages = [];
         }
 
         state.chats = await api('GET', `/api/chats/${state.currentCharacterId}`);
@@ -1657,6 +1817,11 @@ async function deleteChat(chatId) {
 // ══════════════════════════════════════════════════════════
 
 function renderMessages(messages) {
+    state.currentMessages = Array.isArray(messages) ? messages : [];
+    const currentChat = state.chats.find(c => c.id === state.currentChatId);
+    if (currentChat) {
+        currentChat.messages = state.currentMessages;
+    }
     const container = $('#chat-messages');
     const char = state.characters.find(c => c.id === state.currentCharacterId);
     const charAvatar = char ? getAvatarInnerHtml(char.avatar, char.name) : 'A';
@@ -1684,9 +1849,9 @@ function renderMessages(messages) {
             const current = (m.selectedAlternate || 0) + 1;
             alternatesHtml = `
                 <div class="alternate-nav">
-                    <button onclick="changeAlternate(${index}, -1)">&lt;</button>
+                    <button onclick="changeAlternate(${index}, -1, '${m.id || ''}')">&lt;</button>
                     <span>${current}/${total}</span>
-                    <button onclick="changeAlternate(${index}, 1)">&gt;</button>
+                    <button onclick="changeAlternate(${index}, 1, '${m.id || ''}')">&gt;</button>
                 </div>
             `;
             const selIdx = m.selectedAlternate || 0;
@@ -1695,9 +1860,10 @@ function renderMessages(messages) {
 
         const regenerateBtn = isLastAssistant ? `<button class="regenerate-btn" onclick="regenerateLastMessage()" title="${t('chat.action.regenerate') || 'Regenerate'}">🔄</button>` : '';
         const touchEvents = isLastAssistant ? 'ontouchstart="handleTouchStart(event)" ontouchend="handleTouchEnd(event, this)"' : '';
+        const msgId = m.id || '';
 
         return `
-            <div class="message ${m.role}" data-index="${index}">
+            <div class="message ${m.role}" data-index="${index}" data-id="${msgId}">
                 <div class="message-avatar">${avatar}</div>
                 <div style="flex:1; min-width:0;">
                     <div class="message-bubble-container" ${touchEvents}>
@@ -1707,8 +1873,8 @@ function renderMessages(messages) {
                     ${alternatesHtml}
                     <div class="message-meta">
                         ${time ? `<span class="message-time">${time}</span>` : ''}
-                        <button class="message-action-btn" onclick="editMessage(${index})" title="${t('chat.action.edit') || t('btn.edit') || 'Edit'}">✏️</button>
-                        <button class="message-action-btn message-delete-btn" onclick="deleteMessage(${index})" title="${t('chat.action.delete') || 'Hapus'}">🗑️</button>
+                        <button class="message-action-btn" onclick="editMessage(${index}, '${msgId}')" title="${t('chat.action.edit') || t('btn.edit') || 'Edit'}">✏️</button>
+                        <button class="message-action-btn message-delete-btn" onclick="deleteMessage(${index}, '${msgId}')" title="${t('chat.action.delete') || 'Hapus'}">🗑️</button>
                     </div>
                 </div>
             </div>`;
@@ -1717,7 +1883,21 @@ function renderMessages(messages) {
     scrollToBottom();
 }
 
-function appendMessage(role, content, isLastAssistant = false) {
+function appendMessage(role, content, isLastAssistant = false, messageId = null) {
+    if (!Array.isArray(state.currentMessages)) {
+        state.currentMessages = [];
+    }
+    state.currentMessages.push({
+        role,
+        content,
+        timestamp: new Date().toISOString(),
+        id: messageId || ''
+    });
+    const currentChat = state.chats.find(c => c.id === state.currentChatId);
+    if (currentChat) {
+        currentChat.messages = state.currentMessages;
+    }
+
     const container = $('#chat-messages');
     const char = state.characters.find(c => c.id === state.currentCharacterId);
     const charAvatar = char ? getAvatarInnerHtml(char.avatar, char.name) : 'A';
@@ -1740,10 +1920,12 @@ function appendMessage(role, content, isLastAssistant = false) {
     const index = document.querySelectorAll('#chat-messages .message').length;
     const regenerateBtn = isLastAssistant ? `<button class="regenerate-btn" onclick="regenerateLastMessage()" title="${t('chat.action.regenerate') || 'Regenerate'}">🔄</button>` : '';
     const touchEvents = isLastAssistant ? 'ontouchstart="handleTouchStart(event)" ontouchend="handleTouchEnd(event, this)"' : '';
+    const msgId = messageId || '';
 
     const div = document.createElement('div');
     div.className = `message ${role}`;
     div.dataset.index = index;
+    div.dataset.id = msgId;
     div.innerHTML = `
         <div class="message-avatar">${avatar}</div>
         <div style="flex:1; min-width:0;">
@@ -1753,8 +1935,8 @@ function appendMessage(role, content, isLastAssistant = false) {
             </div>
             <div class="message-meta">
                 <span class="message-time">${time}</span>
-                <button class="message-action-btn" onclick="editMessage(${index})" title="${t('chat.action.edit') || t('btn.edit') || 'Edit'}">✏️</button>
-                <button class="message-action-btn message-delete-btn" onclick="deleteMessage(${index})" title="${t('chat.action.delete') || 'Hapus'}">🗑️</button>
+                <button class="message-action-btn" onclick="editMessage(${index}, '${msgId}')" title="${t('chat.action.edit') || t('btn.edit') || 'Edit'}">✏️</button>
+                <button class="message-action-btn message-delete-btn" onclick="deleteMessage(${index}, '${msgId}')" title="${t('chat.action.delete') || 'Hapus'}">🗑️</button>
             </div>
         </div>`;
     container.appendChild(div);
@@ -1777,10 +1959,6 @@ async function sendMessage() {
     const input = $('#chat-input');
     const text = input.value.trim();
     if (!text) return;
-    if (state.sending) {
-        toast(t('toast.please_wait') || 'Please wait for the current reply to finish', 'info');
-        return;
-    }
 
     if (state.currentGroupId) {
         return sendGroupMessage(text);
@@ -1788,62 +1966,88 @@ async function sendMessage() {
 
     if (!state.currentCharacterId || !state.currentChatId) return;
 
-    state.sending = true;
-    input.value = '';
-    autoResizeInput();
     const requestChatId = state.currentChatId; // capture before the await
     const requestCharacterId = state.currentCharacterId;
 
-    // Show user message immediately
-    const userBubble = appendMessage('user', text);
+    if (isChatSending(requestChatId)) {
+        toast(t('toast.please_wait') || 'Please wait for the current reply to finish', 'info');
+        return;
+    }
 
-    // Show typing indicator
-    $('#typing-indicator').style.display = 'flex';
-    $('#btn-send').disabled = true;
+    state.sendingChats.add(requestChatId);
+    input.value = '';
+    autoResizeInput();
+
+    // Show user message immediately with a unique ID
+    const userMsgId = (typeof crypto !== 'undefined' && crypto.randomUUID) ? crypto.randomUUID() : ('msg-' + Date.now() + '-' + Math.random().toString(36).substring(2, 9));
+    const userBubble = appendMessage('user', text, false, userMsgId);
+
+    // Update typing indicator & send button for this chat
+    updateChatSendingUI();
 
     try {
         const result = await api('POST', '/api/chat/send', {
             characterId: requestCharacterId,
             chatId: requestChatId,
-            userMessage: text
+            userMessage: text,
+            userMessageId: userMsgId
         });
-
-        $('#typing-indicator').style.display = 'none';
 
         if (result.error) {
             // The message was never saved server-side — remove the phantom
             // bubble and give the text back so the user can retry.
-            if (userBubble) userBubble.remove();
-            input.value = text;
-            autoResizeInput();
+            if (state.currentChatId === requestChatId && !state.currentGroupId) {
+                if (userBubble) userBubble.remove();
+                if (Array.isArray(state.currentMessages) && state.currentMessages.length > 0) {
+                    state.currentMessages.pop();
+                }
+                input.value = text;
+                autoResizeInput();
+            }
             toast(result.error, 'error');
             return;
         }
 
-        if (state.currentChatId !== requestChatId) {
+        if (state.currentChatId !== requestChatId || state.currentGroupId) {
             // User switched to a different chat while this was in flight —
             // the reply was saved server-side, just don't render it here (H6).
             state.unreadChats.add(requestChatId);
-            if (state.currentCharacterId === requestCharacterId) renderChatList();
+            state.unreadCharacters.add(requestCharacterId);
+            renderCharacterList();
+            if (state.currentCharacterId === requestCharacterId && !state.currentGroupId) {
+                renderChatList();
+            }
             return;
         }
 
         // Show assistant response
-        appendMessage('assistant', result.content, true);
+        appendMessage('assistant', result.content, true, result.messageId);
 
         // Refresh chat list (title might have changed)
         state.chats = await api('GET', `/api/chats/${requestCharacterId}`);
-        if (state.currentCharacterId === requestCharacterId) renderChatList();
+        const currentChatInList = state.chats.find(c => c.id === state.currentChatId);
+        if (currentChatInList && state.currentMessages) {
+            currentChatInList.messages = state.currentMessages;
+        }
+        if (state.currentCharacterId === requestCharacterId && !state.currentGroupId) {
+            renderChatList();
+        }
 
     } catch (err) {
-        $('#typing-indicator').style.display = 'none';
-        if (userBubble) userBubble.remove();
-        input.value = text;
-        autoResizeInput();
+        if (state.currentChatId === requestChatId && !state.currentGroupId) {
+            if (userBubble) userBubble.remove();
+            if (Array.isArray(state.currentMessages) && state.currentMessages.length > 0) {
+                state.currentMessages.pop();
+            }
+            input.value = text;
+            autoResizeInput();
+        }
         toast(`Error: ${err.message}`, 'error');
     } finally {
-        state.sending = false;
-        $('#btn-send').disabled = false;
+        state.sendingChats.delete(requestChatId);
+        if (state.currentChatId === requestChatId && !state.currentGroupId) {
+            updateChatSendingUI();
+        }
     }
 }
 
@@ -1865,19 +2069,25 @@ window.handleTouchEnd = function (e, element) {
 };
 
 window.regenerateLastMessage = async function () {
-    if (!state.currentCharacterId || !state.currentChatId || state.sending) return;
+    if (!state.currentCharacterId || !state.currentChatId) return;
+    const requestChatId = state.currentChatId; // capture before the await
+    const requestCharacterId = state.currentCharacterId;
 
-    state.sending = true;
+    if (isChatSending(requestChatId)) return;
+
+    const lastMsgEl = document.querySelector('#chat-messages .message:last-child');
+    const messageId = lastMsgEl?.dataset?.id;
+
+    state.sendingChats.add(requestChatId);
     const btn = document.querySelector('.regenerate-btn');
     if (btn) btn.innerHTML = '<span class="spinner"></span>';
-    const sendBtn = $('#btn-send');
-    if (sendBtn) sendBtn.disabled = true;
-    const requestChatId = state.currentChatId; // capture before the await
+    updateChatSendingUI();
 
     try {
         const result = await api('POST', '/api/chat/regenerate', {
-            characterId: state.currentCharacterId,
-            chatId: requestChatId
+            characterId: requestCharacterId,
+            chatId: requestChatId,
+            messageId: messageId || undefined
         });
 
         if (result.error) {
@@ -1885,26 +2095,33 @@ window.regenerateLastMessage = async function () {
             return;
         }
 
-        if (state.currentChatId !== requestChatId) {
+        if (state.currentChatId !== requestChatId || state.currentGroupId) {
             state.unreadChats.add(requestChatId);
-            renderChatList();
+            state.unreadCharacters.add(requestCharacterId);
+            renderCharacterList();
+            if (state.currentCharacterId === requestCharacterId && !state.currentGroupId) {
+                renderChatList();
+            }
             return; // user switched chats meanwhile
         }
 
         const chat = await api('GET', `/api/chat/${requestChatId}`);
-        if (chat && !chat.error && state.currentChatId === requestChatId) {
+        if (chat && !chat.error && state.currentChatId === requestChatId && !state.currentGroupId) {
             renderMessages(chat.messages || []);
         }
     } catch (err) {
         toast(`Error: ${err.message}`, 'error');
     } finally {
-        state.sending = false;
-        if (btn) btn.innerHTML = '🔄';
-        if (sendBtn) sendBtn.disabled = false;
+        state.sendingChats.delete(requestChatId);
+        if (state.currentChatId === requestChatId && !state.currentGroupId) {
+            if (btn) btn.innerHTML = '🔄';
+            updateChatSendingUI();
+        }
     }
 };
 
-window.changeAlternate = async function (msgIndex, delta) {
+window.changeAlternate = async function (msgIndex, delta, messageId) {
+    if (isCurrentChatSending()) return toast(t('toast.please_wait') || 'Tunggu balasan selesai dulu ya', 'info');
     state._alternateNavBusy = state._alternateNavBusy || new Set();
     if (state._alternateNavBusy.has(msgIndex)) return; // ignore rapid double-clicks mid-request
     state._alternateNavBusy.add(msgIndex);
@@ -1919,7 +2136,18 @@ window.changeAlternate = async function (msgIndex, delta) {
         // this alternate-selection onto) whatever chat is showing now.
         if (state.currentChatId !== requestChatId) return;
 
-        const msg = chat.messages[msgIndex];
+        let msg = null;
+        let actualIndex = msgIndex;
+        if (messageId && Array.isArray(chat.messages)) {
+            const fIdx = chat.messages.findIndex(m => m.id === messageId);
+            if (fIdx !== -1) {
+                msg = chat.messages[fIdx];
+                actualIndex = fIdx;
+            }
+        }
+        if (!msg && chat.messages && chat.messages[msgIndex]) {
+            msg = chat.messages[msgIndex];
+        }
         if (!msg || !msg.alternates) return;
 
         let sel = msg.selectedAlternate || 0;
@@ -1933,7 +2161,8 @@ window.changeAlternate = async function (msgIndex, delta) {
         renderMessages(chat.messages);
 
         await api('PUT', `/api/chat/${requestChatId}/alternate`, {
-            messageIndex: msgIndex,
+            messageIndex: actualIndex,
+            messageId: messageId || undefined,
             selectedAlternate: sel
         });
     } finally {
@@ -1941,18 +2170,29 @@ window.changeAlternate = async function (msgIndex, delta) {
     }
 };
 
-window.editMessage = async function (index) {
+window.editMessage = async function (index, messageId) {
+    if (isCurrentChatSending()) return toast(t('toast.please_wait') || 'Tunggu balasan selesai dulu ya', 'info');
     const requestChatId = state.currentChatId; // capture before the await
     const chat = await api('GET', `/api/chat/${requestChatId}`);
     if (!chat || chat.error) return;
-    // Bail out if the user navigated to a different chat while this GET
-    // was in flight — the fetched message/index belongs to requestChatId,
-    // not to whatever chat is now showing.
     if (state.currentChatId !== requestChatId) return;
-    const msg = chat.messages[index];
+
+    let msg = null;
+    let actualIndex = index;
+    if (messageId && Array.isArray(chat.messages)) {
+        const fIdx = chat.messages.findIndex(m => m.id === messageId);
+        if (fIdx !== -1) {
+            msg = chat.messages[fIdx];
+            actualIndex = fIdx;
+        }
+    }
+    if (!msg && chat.messages && chat.messages[index]) {
+        msg = chat.messages[index];
+    }
     if (!msg) return;
 
-    const messageDiv = document.querySelector(`.message[data-index="${index}"]`);
+    const messageDiv = (messageId && document.querySelector(`.message[data-id="${messageId}"]`))
+        || document.querySelector(`.message[data-index="${index}"]`);
     if (!messageDiv) return;
 
     const msgEl = messageDiv.querySelector('.message-bubble-container');
@@ -1965,14 +2205,18 @@ window.editMessage = async function (index) {
     if (metaEl) metaEl.style.display = 'none';
     if (alternatesEl) alternatesEl.style.display = 'none';
 
+    const existingEdit = messageDiv.querySelector('.message-edit-container') || document.getElementById(`edit-container-${actualIndex}`);
+    if (existingEdit) existingEdit.remove();
+
     const editContainer = document.createElement('div');
     editContainer.className = 'message-edit-container';
-    editContainer.id = `edit-container-${index}`;
+    editContainer.id = `edit-container-${actualIndex}`;
+    editContainer.dataset.msgId = messageId || (msg.id || '');
     editContainer.innerHTML = `
-        <textarea class="message-edit-textarea" id="edit-textarea-${index}">${escapeHtml(originalContent)}</textarea>
+        <textarea class="message-edit-textarea" id="edit-textarea-${actualIndex}">${escapeHtml(originalContent)}</textarea>
         <div class="message-edit-actions">
-            <button class="btn-secondary" style="padding: 6px 12px; font-size: 0.85rem;" onclick="cancelEdit(${index})">${t('btn.cancel')}</button>
-            <button class="btn-primary" style="padding: 6px 12px; font-size: 0.85rem;" onclick="saveEdit(${index})">${t('btn.save')}</button>
+            <button class="btn-secondary" style="padding: 6px 12px; font-size: 0.85rem;" onclick="cancelEdit(${actualIndex}, '${messageId || ''}')">${t('btn.cancel')}</button>
+            <button class="btn-primary" style="padding: 6px 12px; font-size: 0.85rem;" onclick="saveEdit(${actualIndex}, '${messageId || ''}')">${t('btn.save')}</button>
         </div>
     `;
 
@@ -1980,7 +2224,7 @@ window.editMessage = async function (index) {
 
     messageDiv.classList.add('is-editing');
 
-    const textarea = document.getElementById(`edit-textarea-${index}`);
+    const textarea = document.getElementById(`edit-textarea-${actualIndex}`);
     const resizeTextarea = () => {
         textarea.style.height = 'auto';
         textarea.style.height = Math.max(120, textarea.scrollHeight) + 'px';
@@ -1989,11 +2233,14 @@ window.editMessage = async function (index) {
     setTimeout(resizeTextarea, 0);
 };
 
-window.cancelEdit = function (index) {
-    const editContainer = document.getElementById(`edit-container-${index}`);
+window.cancelEdit = function (index, messageId) {
+    const messageDiv = (messageId && document.querySelector(`.message[data-id="${messageId}"]`))
+        || document.querySelector(`.message[data-index="${index}"]`);
+
+    const editContainer = document.getElementById(`edit-container-${index}`)
+        || (messageDiv && messageDiv.querySelector('.message-edit-container'));
     if (editContainer) editContainer.remove();
 
-    const messageDiv = document.querySelector(`.message[data-index="${index}"]`);
     if (!messageDiv) return;
 
     const msgEl = messageDiv.querySelector('.message-bubble-container');
@@ -2007,54 +2254,63 @@ window.cancelEdit = function (index) {
     messageDiv.classList.remove('is-editing');
 };
 
-window.saveEdit = async function (index) {
-    const textarea = document.getElementById(`edit-textarea-${index}`);
+window.saveEdit = async function (index, messageId) {
+    if (isCurrentChatSending()) return toast(t('toast.please_wait') || 'Tunggu balasan selesai dulu ya', 'info');
+    const editContainer = document.getElementById(`edit-container-${index}`)
+        || (messageId ? document.querySelector(`.message-edit-container[data-msg-id="${messageId}"]`) : null);
+    const textarea = editContainer ? editContainer.querySelector('.message-edit-textarea') : document.getElementById(`edit-textarea-${index}`);
     if (!textarea) return;
 
     const newContent = textarea.value.trim();
-    if (!newContent) return cancelEdit(index);
+    if (!newContent) return cancelEdit(index, messageId);
 
     const requestChatId = state.currentChatId; // capture before any await
-    const btn = textarea.nextElementSibling.querySelector('.btn-primary');
-    btn.disabled = true;
-    btn.textContent = t('btn.saving');
+    const btn = editContainer ? editContainer.querySelector('.btn-primary') : textarea.nextElementSibling.querySelector('.btn-primary');
+    if (btn) {
+        btn.disabled = true;
+        btn.textContent = t('btn.saving');
+    }
 
     try {
-        const result = await api('PUT', `/api/chat/${requestChatId}/message`, {
+        const payload = {
             messageIndex: index,
             content: newContent
-        });
+        };
+        if (messageId) payload.messageId = messageId;
+
+        const result = await api('PUT', `/api/chat/${requestChatId}/message`, payload);
 
         if (result.error) {
             toast(result.error, 'error');
-            btn.disabled = false;
-            btn.textContent = t('btn.save');
+            if (btn) {
+                btn.disabled = false;
+                btn.textContent = t('btn.save');
+            }
             return;
         }
 
-        // Only refresh the rendered messages if the user is still on the
-        // chat that was just edited. If they navigated away meanwhile,
-        // the edit already persisted server-side — nothing more to do
-        // here, and calling loadChat now would wrongly re-render whatever
-        // *different* chat happens to be current.
+        // Only refresh the rendered messages if the user is still on the chat that was just edited.
         if (state.currentChatId === requestChatId) {
             await loadChat(requestChatId);
         }
     } catch (err) {
         toast(`Error: ${err.message}`, 'error');
-        btn.disabled = false;
-        btn.textContent = t('btn.save');
+        if (btn) {
+            btn.disabled = false;
+            btn.textContent = t('btn.save');
+        }
     }
 };
 
-window.deleteMessage = async function (index) {
-    if (!state.currentChatId || state.sending) return;
+window.deleteMessage = async function (index, messageId) {
+    if (isCurrentChatSending()) return toast(t('toast.please_wait') || 'Tunggu balasan selesai dulu ya', 'info');
     const confirmText = t('chat.confirm_delete_msg') || 'Hapus pesan ini dari percakapan?';
     if (!confirm(confirmText)) return;
 
     const requestChatId = state.currentChatId;
+    const target = messageId || index;
     try {
-        const result = await api('DELETE', `/api/chat/${requestChatId}/message/${index}`);
+        const result = await api('DELETE', `/api/chat/${requestChatId}/message/${target}`);
         if (result.error) {
             toast(result.error, 'error');
             return;
@@ -2096,6 +2352,7 @@ async function openMemoryViewer() {
         } else if (!state.memory.personaId && state.personas.length > 0) {
             state.memory.personaId = state.personas[0].id;
         }
+        state.memoryModalDraftPersonaId = state.memory.personaId;
         renderMemory();
         openModal('modal-memory');
         closeSidebarOnMobile();
@@ -2121,6 +2378,7 @@ async function openMemoryViewer() {
     if (!state.memory.personaId && state.personas.length > 0) {
         state.memory.personaId = state.personas[0].id;
     }
+    state.memoryModalDraftPersonaId = state.memory.personaId;
     renderMemory();
     openModal('modal-memory');
     closeSidebarOnMobile();
@@ -2168,7 +2426,7 @@ function renderPersonaSelector() {
     if (!container || !summaryEl) return;
 
     const personas = state.personas || [];
-    const currentId = String(state.memory?.personaId || (personas[0]?.id || '1'));
+    const currentId = String(state.memoryModalDraftPersonaId || state.memory?.personaId || (personas[0]?.id || '1'));
 
     if (personas.length === 0) {
         container.innerHTML = '<div style="color:var(--text-muted); font-size:0.8rem">Belum ada persona tersimpan.</div>';
@@ -2190,19 +2448,8 @@ function renderPersonaSelector() {
     container.querySelectorAll('.persona-chip-btn').forEach(btn => {
         btn.addEventListener('click', () => {
             const id = btn.dataset.id;
-            if (state.memory) {
-                state.memory.personaId = id;
-                renderPersonaSelector();
-                if (state.currentGroupId) {
-                    const group = state.groups.find(g => g.id === state.currentGroupId);
-                    if (group) group.activePersonaId = id;
-                } else {
-                    const currentChat = state.chats.find(c => c.id === state.currentChatId);
-                    if (currentChat && currentChat.messages) {
-                        renderMessages(currentChat.messages);
-                    }
-                }
-            }
+            state.memoryModalDraftPersonaId = id;
+            renderPersonaSelector();
         });
     });
 
@@ -2265,12 +2512,25 @@ async function saveMemory() {
     if (state.currentGroupId) {
         if (!state.memory) return;
         const requestGroupId = state.currentGroupId;
+
+        if (state.memoryModalDraftPersonaId) {
+            state.memory.personaId = state.memoryModalDraftPersonaId;
+        }
+
         await api('PUT', `/api/groups/${requestGroupId}/memory`, state.memory);
         if (state.currentGroupId !== requestGroupId) return;
         const group = state.groups.find(g => g.id === requestGroupId);
         if (group && state.memory.personaId) {
             group.activePersonaId = state.memory.personaId;
         }
+
+        if (state.currentGroupChatId) {
+            const freshChat = await api('GET', `/api/groups/${requestGroupId}/chat/${state.currentGroupChatId}`);
+            if (freshChat && Array.isArray(freshChat.messages)) {
+                renderGroupMessages(freshChat.messages);
+            }
+        }
+
         toast(t('toast.group_memory_saved') || 'Memori grup disimpan!', 'success');
         closeModal('modal-memory');
         return;
@@ -2278,8 +2538,26 @@ async function saveMemory() {
 
     if (!state.currentCharacterId || !state.memory) return;
     const requestCharacterId = state.currentCharacterId; // capture before the await
+
+    if (state.memoryModalDraftPersonaId) {
+        state.memory.personaId = state.memoryModalDraftPersonaId;
+    }
+
     await api('PUT', `/api/memory/${requestCharacterId}`, state.memory);
     if (state.currentCharacterId !== requestCharacterId) return;
+
+    if (state.currentChatId) {
+        const freshChat = await api('GET', `/api/chat/${state.currentChatId}`);
+        if (freshChat && Array.isArray(freshChat.messages) && state.currentCharacterId === requestCharacterId) {
+            state.currentMessages = freshChat.messages;
+            const currentChat = state.chats.find(c => c.id === state.currentChatId);
+            if (currentChat) currentChat.messages = freshChat.messages;
+            renderMessages(freshChat.messages);
+        } else if (Array.isArray(state.currentMessages) && state.currentMessages.length > 0) {
+            renderMessages(state.currentMessages);
+        }
+    }
+
     toast(t('toast.memory_saved'), 'success');
     closeModal('modal-memory');
 }
@@ -2384,6 +2662,9 @@ function openModal(id) {
 }
 
 function closeModal(id) {
+    if (id === 'modal-memory') {
+        state.memoryModalDraftPersonaId = null;
+    }
     $(`#${id}`).classList.remove('show');
 }
 
@@ -2418,16 +2699,40 @@ function escapeHtml(text) {
 
 function formatMessageContent(content) {
     if (!content) return '';
-    // Basic markdown-like formatting
     let html = escapeHtml(content);
-    // Bold
-    html = html.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>');
-    // Italic
-    html = html.replace(/\*(.+?)\*/g, '<em>$1</em>');
-    // Action text *action*
-    html = html.replace(/(?:^|\n)\*(.+?)\*(?:\n|$)/g, '<em style="color:var(--text-secondary)">*$1*</em>');
+
+    // Protect code blocks and inline code from markdown formatting
+    const codeBlocks = [];
+    html = html.replace(/```([a-zA-Z0-9_-]*)\n?([\s\S]*?)```/g, (match, lang, code) => {
+        const idx = codeBlocks.length;
+        codeBlocks.push(`<pre><code class="language-${lang}">${code}</code></pre>`);
+        return `@@CODE_BLOCK_${idx}@@`;
+    });
+    html = html.replace(/`([^`\n]+)`/g, (match, code) => {
+        const idx = codeBlocks.length;
+        codeBlocks.push(`<code>${code}</code>`);
+        return `@@CODE_BLOCK_${idx}@@`;
+    });
+
+    // Bold-italic: ***text***
+    html = html.replace(/(?<!\*)\*\*\*(?!\s|\*)((?:(?!\*\*\*)[^\n]|\n(?!\n))+?)(?<!\s|\*)\*\*\*(?!\*)/g, '<strong><em class="action-text">$1</em></strong>');
+
+    // Bold: **text** (and __text__)
+    html = html.replace(/(?<!\*)\*\*(?!\s|\*)((?:(?!\*\*)[^\n]|\n(?!\n))+?)(?<!\s|\*)\*\*(?!\*)/g, '<strong>$1</strong>');
+    html = html.replace(/\b__([^\n_]+)__\b/g, '<strong>$1</strong>');
+
+    // Italic / Action text: *action*
+    html = html.replace(/(?<!\*)\*(?!\s|\*)((?:[^\*\n]|\n(?!\n))+?)(?<!\s|\*)\*(?!\*)/g, '<em class="action-text">$1</em>');
+
+    // Dialogue text in quotes: "dialog"
+    html = html.replace(/(?:&quot;|“)((?:(?!(?:&quot;|”|“)).|\n(?!\n))+?)(?:&quot;|”)/g, '<span class="dialog-text">&quot;$1&quot;</span>');
+
     // Line breaks
     html = html.replace(/\n/g, '<br>');
+
+    // Restore protected code blocks
+    html = html.replace(/@@CODE_BLOCK_(\d+)@@/g, (_, idx) => codeBlocks[Number(idx)] || '');
+
     return html;
 }
 

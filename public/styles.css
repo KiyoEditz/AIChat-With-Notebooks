@@ -966,9 +966,11 @@ body {
     color: var(--text-primary);
 }
 
-.message.assistant .message-bubble em {
+.message.assistant .message-bubble em,
+.message.assistant .message-bubble .action-text {
     font-style: italic;
     color: var(--text-muted);
+    opacity: 0.88;
 }
 
 .message.assistant .message-bubble strong {
@@ -976,12 +978,44 @@ body {
     color: var(--text-primary);
 }
 
-.message.user .message-bubble em {
+.message.user .message-bubble em,
+.message.user .message-bubble .action-text {
+    font-style: italic;
     color: color-mix(in srgb, var(--text-on-accent) 80%, transparent);
+    opacity: 0.9;
 }
 
 .message.user .message-bubble strong {
     font-weight: 700;
+}
+
+.message.assistant .message-bubble .dialog-text {
+    font-style: normal;
+    color: var(--text-primary);
+    opacity: 1;
+}
+
+.message.user .message-bubble .dialog-text {
+    font-style: normal;
+    color: var(--text-on-accent, #ffffff);
+    opacity: 1;
+}
+
+.message-bubble code {
+    font-family: var(--font-mono, monospace);
+    font-size: 0.88em;
+    padding: 2px 6px;
+    border-radius: 4px;
+    background: rgba(0, 0, 0, 0.15);
+}
+
+.message-bubble pre code {
+    display: block;
+    padding: 10px 12px;
+    overflow-x: auto;
+    border-radius: 6px;
+    margin: 6px 0;
+    line-height: 1.4;
 }
 
 .message-time {
