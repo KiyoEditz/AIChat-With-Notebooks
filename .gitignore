@@ -9,8 +9,11 @@ data/persona/*
 package-lock.json
 
 # Character files
+# Backup Character
 karakter.json
+# Character experimental memory
 9c8296b3-0b85-4698-a424-15f168c03a98.json
+# Private Character(what? dev can have a fantasy right?)
 data/characters/562d4ca2-023f-46ee-ace6-acb4f47f11b0.json
 data/characters/6f51b687-91e7-44ec-b33a-09892d437faf.json
 data/characters/7f69cb37-b8e3-4949-81f9-0c3a6422daae.json
@@ -19,7 +22,9 @@ data/characters/4f3a4bcc-2130-4225-83ea-580f93831b67.json
 data/characters/898bb331-8634-491c-856d-a9edf3d5c0a1.json
 data/characters/6283f4d4-f7dd-4af3-ab5e-692b17cc673f.json
 data/characters/bccc5c0e-07e1-414a-b347-1985c17c8827.json
-
+data/characters/71e1df6c-ea01-476b-9539-38ad2883fb60.json
+data/characters/5c2e564b-b1c0-4074-9143-cbac75673ab0.json
+data/characters/6c13277b-7639-4611-9280-97db6561d097.json
 
 # Errors
 error.txt
