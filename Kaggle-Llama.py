@@ -77,8 +77,11 @@ GITHUB_RELEASE_URL = "https://github.com/KiyoEditz/AIChat-With-Notebooks/release
 # multi-arch CUDA_ARCH first -- the old single-arch (sm75) tarball won't
 # satisfy the arch-coverage check below if Kaggle ever offers non-T4 GPUs.
 
-NUM_CTX = 12288   # 2x T4 gives more VRAM headroom than single-GPU Colab.
-GPU_IDS = "0,1"   # do NOT set to just "0" -- the model needs both to fit.
+PARALLEL_SLOTS = 4  # Number of concurrent sessions/slots that can be processed.
+CTX_SLOT = 8192     # Max number of tokens per session.
+NUM_CTX = PARALLEL_SLOTS * CTX_SLOT  # Total context window across all parallel slots.
+CACHE_RAM = 16384   # 16 GB of system RAM for prompt/context caching.
+GPU_IDS = "0,1"     # do NOT set to just "0" -- the model needs both to fit.
 
 # Scratch storage -- Kaggle-specific paths per the migration spec. Do NOT
 # assume /kaggle/tmp exists outside Kaggle (Colab uses /content instead --
@@ -741,6 +744,10 @@ try:
         f"--host 0.0.0.0 --port {LLAMA_PORT} "
         f"--api-key {API_KEY} "
         f"--ctx-size {NUM_CTX} "
+        f"--parallel {PARALLEL_SLOTS} "
+        f"--no-mmap "
+        f"--cache-ram {CACHE_RAM} "
+        f"--flash-attn on -ctk q8_0 -ctv q8_0 "
         f"-ngl 99 --split-mode layer "
         f"--repeat-last-n {REPEAT_LAST_N} --repeat-penalty {REPEAT_PENALTY} "
         f"--presence-penalty {PRESENCE_PENALTY} --frequency-penalty {FREQUENCY_PENALTY} "

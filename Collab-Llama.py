@@ -89,8 +89,10 @@ GITHUB_RELEASE_URL = "https://github.com/KiyoEditz/AIChat-With-Notebooks/release
 # multi-arch CUDA_ARCH first -- the old single-arch (sm75) tarball at the
 # previous URL won't satisfy the arch-coverage check below on non-T4 GPUs.
 
-NUM_CTX = 8192   # Adjust down if VRAM is tight on a smaller GPU (T4/L4);
-                  # a big-VRAM GPU (A100) can comfortably go higher.
+PARALLEL_SLOTS = 4  # Number of concurrent sessions/slots that can be processed.
+CTX_SLOT = 8192     # Max number of tokens per session.
+NUM_CTX = PARALLEL_SLOTS * CTX_SLOT  # Total context window across all parallel slots.
+CACHE_RAM = 8192    # 8 GB of system RAM for prompt/context caching (fits safely in Colab ~12.7GB RAM).
 
 # Scratch storage -- ephemeral, local-disk, NOT Google Drive. Wiped when the
 # runtime disconnects, which is fine/expected (re-downloaded next run, or
@@ -736,6 +738,10 @@ try:
         f"--host 0.0.0.0 --port {LLAMA_PORT} "
         f"--api-key {API_KEY} "
         f"--ctx-size {NUM_CTX} "
+        f"--parallel {PARALLEL_SLOTS} "
+        f"--no-mmap "
+        f"--cache-ram {CACHE_RAM} "
+        f"--flash-attn on -ctk q8_0 -ctv q8_0 "
         f"-ngl 99 "
         f"--repeat-last-n {REPEAT_LAST_N} --repeat-penalty {REPEAT_PENALTY} "
         f"--presence-penalty {PRESENCE_PENALTY} --frequency-penalty {FREQUENCY_PENALTY} "
