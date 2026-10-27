@@ -1,6 +1,7 @@
 # Project files
 node_modules/
 .env
+.agent
 __pycache__
 data/chats/groups/*
 data/chats/private/*
