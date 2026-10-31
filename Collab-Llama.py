@@ -44,7 +44,7 @@ separate, opt-in alternative.
 5. Keep this cell running while you use the remote LLM
 """
 
-import subprocess, time, os, re, sys, shutil, glob, hashlib, tarfile, requests, socket
+import subprocess, time, os, re, sys, gc, atexit, signal, shutil, glob, hashlib, tarfile, requests, socket
 
 # =====================================================================
 # CONFIGURATION
@@ -130,10 +130,14 @@ def sh(cmd, check=True, quiet=False, capture=False):
 
 def bg(cmd, log=None, cwd=None, env=None):
     out = open(log, "w") if log else subprocess.DEVNULL
-    full_env = os.environ.copy()
-    if env:
-        full_env.update(env)
-    return subprocess.Popen(cmd, shell=True, stdout=out, stderr=subprocess.STDOUT, cwd=cwd, env=full_env)
+    try:
+        full_env = os.environ.copy()
+        if env:
+            full_env.update(env)
+        return subprocess.Popen(cmd, shell=True, stdout=out, stderr=subprocess.STDOUT, cwd=cwd, env=full_env)
+    finally:
+        if log and out != subprocess.DEVNULL:
+            out.close()
 
 
 def section(n, total, title):
@@ -153,12 +157,12 @@ def run_with_retry(fn, max_attempts=3, label="operation"):
             time.sleep(wait_s)
 
 
-def acquire_free_port(preferred_port=8080, fallbacks=(8081, 8082, 8088, 8888, 5000, 18080)):
+def acquire_free_port(preferred_port=8080, fallbacks=(8081, 8082, 8088, 18080, 18081)):
     """Ensure a free, bindable TCP port for llama-server. First kills any lingering
     instances and clears the preferred port. If still blocked, falls back to the next
     available port so startup never fails with 'couldn't bind HTTP server socket'."""
-    sh("pkill -9 -f 'llama-server'", check=False, quiet=True)
-    sh("pkill -9 -f cloudflared", check=False, quiet=True)
+    sh("pkill -9 -f '[l]lama-server'", check=False, quiet=True)
+    sh("pkill -9 -f '[c]loudflared'", check=False, quiet=True)
     sh(f"fuser -k -9 {preferred_port}/tcp 2>/dev/null", check=False, quiet=True)
     time.sleep(1)
 
@@ -172,17 +176,7 @@ def acquire_free_port(preferred_port=8080, fallbacks=(8081, 8082, 8088, 8888, 50
                     print(f"  ⚠️ Port {preferred_port} in use; automatically switched to port {p}")
                 return p
             except OSError:
-                sh(f"fuser -k -9 {p}/tcp 2>/dev/null", check=False, quiet=True)
-                time.sleep(0.5)
-                try:
-                    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s2:
-                        s2.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-                        s2.bind(("0.0.0.0", p))
-                        if p != preferred_port:
-                            print(f"  ⚠️ Port {preferred_port} in use; automatically switched to port {p}")
-                        return p
-                except OSError:
-                    continue
+                continue
 
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
         s.bind(("0.0.0.0", 0))
@@ -212,6 +206,11 @@ def detect_gpu_arch():
     return archs
 
 
+def _arch_num(val):
+    m = re.match(r"^(\d+)", str(val))
+    return int(m.group(1)) if m else 0
+
+
 def _parse_embedded_archs(archs_field):
     """Parse a prebuilt tarball's VERSION.txt 'cuda_archs' field, e.g.
     '75-real;80-real;86-real;89-real;90-real;90-virtual', into:
@@ -230,7 +229,7 @@ def _parse_embedded_archs(archs_field):
             real.add(tok[:-len("-real")])
         elif tok.endswith("-virtual"):
             num = tok[:-len("-virtual")]
-            if virtual_max is None or int(num) > int(virtual_max):
+            if virtual_max is None or _arch_num(num) > _arch_num(virtual_max):
                 virtual_max = num
         else:
             real.add(tok)
@@ -272,7 +271,7 @@ def verify_prebuilt(pkg_dir):
         raise RuntimeError("this runtime's GPU arch could not be detected -- refusing to trust a prebuilt blindly")
     elif CUDA_ARCH in real_archs:
         print(f"  GPU sm_{CUDA_ARCH}: native match in prebuilt ({covered_desc})")
-    elif virtual_max and int(CUDA_ARCH) >= int(virtual_max):
+    elif virtual_max and _arch_num(CUDA_ARCH) >= _arch_num(virtual_max):
         print(f"  GPU sm_{CUDA_ARCH}: no native build, but covered via PTX JIT from sm_{virtual_max} "
               f"(first request may warm up a little slower while the driver compiles it)")
     else:
@@ -570,7 +569,12 @@ def ensure_model():
                 )
         print(f"  \u2705 Verified {len(to_download)} file(s) present with correct size")
 
-    ggufs = sorted(glob.glob(f"{MODEL_DIR}/**/*.gguf", recursive=True))
+    planned_ggufs = sorted(
+        os.path.join(MODEL_DIR, f.filename)
+        for f in plan
+        if f.filename.lower().endswith(".gguf") and os.path.isfile(os.path.join(MODEL_DIR, f.filename))
+    )
+    ggufs = planned_ggufs or sorted(glob.glob(f"{MODEL_DIR}/**/*.gguf", recursive=True))
     if not ggufs:
         raise RuntimeError(f"No .gguf files found in {MODEL_DIR} after download")
 
@@ -682,8 +686,9 @@ print("\u2551   \U0001f680  Collab-Llama \u00b7 llama.cpp direct (one-click)    
 print("\u255a" + "\u2550" * 64 + "\u255d")
 
 r = sh("nvidia-smi --query-gpu=name,memory.total --format=csv,noheader", check=False, capture=True)
+gpu_name = r.stdout.strip().splitlines()[0] if r.returncode == 0 and r.stdout.strip() else "unknown"
 if r.returncode == 0:
-    print(f"\n  \U0001f3ae  GPU    : {r.stdout.strip()}")
+    print(f"\n  \U0001f3ae  GPU    : {gpu_name}")
 else:
     print("\n  \u26a0\ufe0f  No GPU — aktifkan GPU apa saja di: Runtime → Change runtime type")
 
@@ -706,10 +711,45 @@ print(f"  \U0001f4e6  Model  : {MODEL_REPO}\n")
 TOTAL_STEPS = 5
 cf_proc = None
 llama_proc = None
+_cleaned_up = False
+
+
+def cleanup(*_args):
+    global _cleaned_up
+    if _cleaned_up:
+        return
+    _cleaned_up = True
+    print("\n  \U0001f9f9 Cleaning up processes and freeing RAM/VRAM...")
+    for proc in [cf_proc, llama_proc]:
+        if proc is None:
+            continue
+        try:
+            proc.terminate()
+            proc.wait(timeout=10)
+        except Exception:
+            try:
+                proc.kill()
+            except Exception:
+                pass
+    sh("pkill -9 -f '[l]lama-server'", check=False, quiet=True)
+    sh("pkill -9 -f '[c]loudflared'", check=False, quiet=True)
+    gc.collect()
+    try:
+        import torch
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
+            torch.cuda.ipc_collect()
+    except Exception:
+        pass
+    print("  \u2705 Cleanup complete -- RAM/VRAM released")
+
+
+atexit.register(cleanup)
+signal.signal(signal.SIGTERM, cleanup)
 
 # Pre-cleanup in case this cell was re-run after a cancelled/crashed attempt
-sh("pkill -9 -f 'llama-server'", check=False, quiet=True)
-sh("pkill -9 -f cloudflared", check=False, quiet=True)
+sh("pkill -9 -f '[l]lama-server'", check=False, quiet=True)
+sh("pkill -9 -f '[c]loudflared'", check=False, quiet=True)
 sh(f"fuser -k -9 {LLAMA_PORT}/tcp 2>/dev/null", check=False, quiet=True)
 time.sleep(1)
 
@@ -774,6 +814,8 @@ try:
                 break
         except Exception:
             pass
+        if cf_proc.poll() is not None:
+            break
 
     if not tunnel_url:
         raise RuntimeError("Could not obtain a Cloudflare tunnel URL — check /tmp/cloudflared.log")
@@ -794,7 +836,7 @@ try:
   llama.cpp    : {llama_ver}
   Model        : {MODEL_REPO}
   Model path   : {model_path} ({gguf_size_gb:.1f} GB)
-  GPU          : {r.stdout.strip() if False else ''}
+  GPU          : {gpu_name}
   Context      : {NUM_CTX}
   Sampler      : repeat_penalty={REPEAT_PENALTY} (last {REPEAT_LAST_N}) | dry_multiplier={DRY_MULTIPLIER}
   Thinking     : {'OFF' if not ENABLE_THINKING else 'ON'}
@@ -828,20 +870,8 @@ try:
         print(f"  [{ts}] heartbeat #{tick:04d} | server {status} | {tunnel_url}")
 
 except KeyboardInterrupt:
-    print("\n  🛑 Shutting down...")
-    for proc in [cf_proc, llama_proc]:
-        if proc:
-            try:
-                proc.terminate()
-            except Exception:
-                pass
-    print("  ✅ Stopped.")
+    cleanup()
 
 except Exception as e:
     print(f"\n  ❌ Startup failed: {e}")
-    for proc in [cf_proc, llama_proc]:
-        if proc:
-            try:
-                proc.terminate()
-            except Exception:
-                pass
+    cleanup()

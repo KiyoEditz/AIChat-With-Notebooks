@@ -120,10 +120,14 @@ def sh(cmd, check=True, quiet=False, capture=False):
 
 def bg(cmd, log=None, env=None, cwd=None):
     out = open(log, "w") if log else subprocess.DEVNULL
-    full_env = os.environ.copy()
-    if env:
-        full_env.update(env)
-    return subprocess.Popen(cmd, shell=True, stdout=out, stderr=subprocess.STDOUT, env=full_env, cwd=cwd)
+    try:
+        full_env = os.environ.copy()
+        if env:
+            full_env.update(env)
+        return subprocess.Popen(cmd, shell=True, stdout=out, stderr=subprocess.STDOUT, env=full_env, cwd=cwd)
+    finally:
+        if log and out != subprocess.DEVNULL:
+            out.close()
 
 
 def section(n, total, title):
@@ -143,12 +147,12 @@ def run_with_retry(fn, max_attempts=3, label="operation"):
             time.sleep(wait_s)
 
 
-def acquire_free_port(preferred_port=8080, fallbacks=(8081, 8082, 8088, 8888, 5000, 18080)):
+def acquire_free_port(preferred_port=8080, fallbacks=(8081, 8082, 8088, 18080, 18081)):
     """Ensure a free, bindable TCP port for llama-server. First kills any lingering
     instances and clears the preferred port. If still blocked, falls back to the next
     available port so startup never fails with 'couldn't bind HTTP server socket'."""
-    sh("pkill -9 -f 'llama-server'", check=False, quiet=True)
-    sh("pkill -9 -f cloudflared", check=False, quiet=True)
+    sh("pkill -9 -f '[l]lama-server'", check=False, quiet=True)
+    sh("pkill -9 -f '[c]loudflared'", check=False, quiet=True)
     sh(f"fuser -k -9 {preferred_port}/tcp 2>/dev/null", check=False, quiet=True)
     time.sleep(1)
 
@@ -162,17 +166,7 @@ def acquire_free_port(preferred_port=8080, fallbacks=(8081, 8082, 8088, 8888, 50
                     print(f"  ⚠️ Port {preferred_port} in use; automatically switched to port {p}")
                 return p
             except OSError:
-                sh(f"fuser -k -9 {p}/tcp 2>/dev/null", check=False, quiet=True)
-                time.sleep(0.5)
-                try:
-                    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s2:
-                        s2.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-                        s2.bind(("0.0.0.0", p))
-                        if p != preferred_port:
-                            print(f"  ⚠️ Port {preferred_port} in use; automatically switched to port {p}")
-                        return p
-                except OSError:
-                    continue
+                continue
 
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
         s.bind(("0.0.0.0", 0))
@@ -201,6 +195,11 @@ def detect_gpu_arch():
     return archs
 
 
+def _arch_num(val):
+    m = re.match(r"^(\d+)", str(val))
+    return int(m.group(1)) if m else 0
+
+
 def _parse_embedded_archs(archs_field):
     """Parse a prebuilt tarball's VERSION.txt 'cuda_archs' field, e.g.
     '75-real;80-real;86-real;89-real;90-real;90-virtual', into:
@@ -218,7 +217,7 @@ def _parse_embedded_archs(archs_field):
             real.add(tok[:-len("-real")])
         elif tok.endswith("-virtual"):
             num = tok[:-len("-virtual")]
-            if virtual_max is None or int(num) > int(virtual_max):
+            if virtual_max is None or _arch_num(num) > _arch_num(virtual_max):
                 virtual_max = num
         else:
             real.add(tok)
@@ -276,8 +275,8 @@ def cleanup(*_args):
                 proc.kill()
             except Exception:
                 pass
-    sh("pkill -9 -f 'llama-server'", check=False, quiet=True)
-    sh("pkill -9 -f cloudflared", check=False, quiet=True)
+    sh("pkill -9 -f '[l]lama-server'", check=False, quiet=True)
+    sh("pkill -9 -f '[c]loudflared'", check=False, quiet=True)
     gc.collect()
     try:
         import torch
@@ -293,8 +292,8 @@ atexit.register(cleanup)
 signal.signal(signal.SIGTERM, cleanup)
 
 # Pre-cleanup in case this cell was re-run after a crashed attempt.
-sh("pkill -9 -f 'llama-server'", check=False, quiet=True)
-sh("pkill -9 -f cloudflared", check=False, quiet=True)
+sh("pkill -9 -f '[l]lama-server'", check=False, quiet=True)
+sh("pkill -9 -f '[c]loudflared'", check=False, quiet=True)
 time.sleep(1)
 
 
@@ -326,7 +325,7 @@ def verify_prebuilt(pkg_dir):
         raise RuntimeError("this runtime's GPU arch could not be detected -- refusing to trust a prebuilt blindly")
     elif CUDA_ARCH in real_archs:
         print(f"  GPU sm_{CUDA_ARCH}: native match in prebuilt ({covered_desc})")
-    elif virtual_max and int(CUDA_ARCH) >= int(virtual_max):
+    elif virtual_max and _arch_num(CUDA_ARCH) >= _arch_num(virtual_max):
         print(f"  GPU sm_{CUDA_ARCH}: no native build, but covered via PTX JIT from sm_{virtual_max} "
               f"(first request may warm up a little slower while the driver compiles it)")
     else:
@@ -593,7 +592,12 @@ def ensure_model():
                 )
         print(f"  \u2705 Verified {len(to_download)} file(s) present with correct size")
 
-    ggufs = sorted(glob.glob(f"{MODEL_DIR}/**/*.gguf", recursive=True))
+    planned_ggufs = sorted(
+        os.path.join(MODEL_DIR, f.filename)
+        for f in plan
+        if f.filename.lower().endswith(".gguf") and os.path.isfile(os.path.join(MODEL_DIR, f.filename))
+    )
+    ggufs = planned_ggufs or sorted(glob.glob(f"{MODEL_DIR}/**/*.gguf", recursive=True))
     if not ggufs:
         raise RuntimeError(f"No .gguf files found in {MODEL_DIR} after download")
 
@@ -784,6 +788,11 @@ try:
                 break
         except Exception:
             pass
+        if _procs["cloudflared"].poll() is not None:
+            break
+
+    if not tunnel_url:
+        raise RuntimeError("Failed to establish Cloudflare tunnel within 90s. Check /tmp/cloudflared.log")
 
     # ------------------------------------------------------------------
     # READY
