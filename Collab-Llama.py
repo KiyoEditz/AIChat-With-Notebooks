@@ -285,12 +285,114 @@ def verify_prebuilt(pkg_dir):
     os.chmod(f"{pkg_dir}/llama-server", 0o755)
 
     r = sh(f"{run_sh} --version", check=False, capture=True)
+    if r.returncode != 0 and ("libcudart.so." in r.stderr or "libcublas.so." in r.stderr or "libcublasLt.so." in r.stderr):
+        ensure_prebuilt_cuda_libs(pkg_dir)
+        r = sh(f"{run_sh} --version", check=False, capture=True)
     if r.returncode != 0:
         raise RuntimeError(f"prebuilt binary failed a real --version run (exit {r.returncode}): {r.stderr[:200]}")
 
     print(f"  \u2705 Prebuilt verified: {meta.get('llama_cpp_tag')} / covers {covered_desc} "
           f"(built {meta.get('built_at', '?')}, CUDA VMM: {meta.get('cuda_vmm', 'unknown')})")
     return run_sh
+
+
+def ensure_prebuilt_cuda_libs(pkg_dir):
+    """Bridge CUDA 12 <-> 13 shared library gaps (e.g. libcudart.so.12 on a CUDA 13 image)."""
+    lib_dir = f"{pkg_dir}/lib"
+    os.makedirs(lib_dir, exist_ok=True)
+    check_targets = [f"{pkg_dir}/llama-server"]
+    if os.path.isfile(f"{lib_dir}/libggml-cuda.so"):
+        check_targets.append(f"{lib_dir}/libggml-cuda.so")
+
+    def find_missing_cuda_sonames():
+        missing = set()
+        env = os.environ.copy()
+        env["LD_LIBRARY_PATH"] = f"{lib_dir}:{pkg_dir}:{env.get('LD_LIBRARY_PATH', '')}"
+        for target in check_targets:
+            r = subprocess.run(["ldd", target], capture_output=True, text=True, env=env)
+            for line in r.stdout.splitlines():
+                if "not found" in line and any(k in line for k in ("libcudart.so", "libcublas.so", "libcublasLt.so")):
+                    soname = line.split("=>")[0].strip()
+                    if soname:
+                        missing.add(soname)
+        return sorted(missing)
+
+    missing = find_missing_cuda_sonames()
+    if not missing:
+        return
+
+    print(f"  \u231b Resolving missing CUDA runtime libraries ({', '.join(missing)})...")
+
+    def link_existing_libs(sonames):
+        search_roots = ["/usr/local", "/usr/lib", "/opt/conda", "/root/.local", "/tmp/cuda-compat-libs"]
+        for site_dir in sys.path:
+            if site_dir and os.path.isdir(site_dir):
+                nvidia_dir = os.path.join(site_dir, "nvidia")
+                if os.path.isdir(nvidia_dir):
+                    search_roots.insert(0, nvidia_dir)
+        for soname in list(sonames):
+            dst = os.path.join(lib_dir, soname)
+            if os.path.exists(dst):
+                sonames.remove(soname)
+                continue
+            found = None
+            for root in search_roots:
+                if not os.path.isdir(root):
+                    continue
+                for dirpath, _, filenames in os.walk(root):
+                    if soname in filenames:
+                        candidate = os.path.join(dirpath, soname)
+                        if os.path.isfile(candidate):
+                            found = os.path.realpath(candidate)
+                            break
+                    for fn in filenames:
+                        if fn.startswith(soname + "."):
+                            candidate = os.path.join(dirpath, fn)
+                            if os.path.isfile(candidate):
+                                found = os.path.realpath(candidate)
+                                break
+                    if found:
+                        break
+                if found:
+                    break
+            if found:
+                try:
+                    if os.path.lexists(dst):
+                        os.remove(dst)
+                    os.symlink(found, dst)
+                    sonames.remove(soname)
+                except OSError:
+                    shutil.copy2(found, dst)
+                    sonames.remove(soname)
+
+    link_existing_libs(missing)
+    missing = find_missing_cuda_sonames()
+    if not missing:
+        print("  \u2705 Linked existing CUDA runtime libraries from system.")
+        return
+
+    need_cu12 = any(".so.12" in s for s in missing)
+    need_cu13 = any(".so.13" in s for s in missing)
+    pip_pkgs = []
+    if need_cu12:
+        pip_pkgs.extend(["nvidia-cuda-runtime-cu12", "nvidia-cublas-cu12"])
+    if need_cu13:
+        pip_pkgs.extend(["nvidia-cuda-runtime-cu13", "nvidia-cublas-cu13"])
+
+    if pip_pkgs:
+        print(f"  \u231b Installing {', '.join(pip_pkgs)} into /tmp/cuda-compat-libs...")
+        sh(
+            f"{sys.executable} -m pip install -q --no-cache-dir --no-deps "
+            f"--target /tmp/cuda-compat-libs {' '.join(pip_pkgs)}",
+            check=False,
+        )
+        link_existing_libs(missing)
+
+    still_missing = find_missing_cuda_sonames()
+    if not still_missing:
+        print("  \u2705 CUDA compatibility libraries ready.")
+    else:
+        print(f"  \u26a0\ufe0f Still missing CUDA libraries: {', '.join(still_missing)}")
 
 
 def resolve_prebuilt_url():
@@ -854,7 +956,7 @@ try:
         f"--api-key {API_KEY} "
         f"--ctx-size {NUM_CTX} "
         f"--parallel {PARALLEL_SLOTS} "
-        f"--no-mmap "
+        f"--load-mode none "
         f"--cache-ram {CACHE_RAM} "
         f"--flash-attn on -ctk q8_0 -ctv q8_0 "
         f"-ngl 99 "

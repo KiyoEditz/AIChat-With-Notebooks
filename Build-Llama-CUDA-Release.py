@@ -458,20 +458,27 @@ if os.path.isdir(build_bin_dir):
                 shutil.copy2(src_path, dst_path)
                 bundled_files.add(item)
 
-# Also inspect ldd output to catch any remaining build-tree libraries
-r = sh(["ldd", SERVER_BIN], check=False, capture=True)
-if r.returncode == 0:
-    for line in r.stdout.splitlines():
-        if "=>" not in line:
-            continue
-        parts = line.split("=>")
-        soname = parts[0].strip()
-        resolved = parts[1].strip().split(" ")[0]
-        if resolved and os.path.isabs(resolved) and BUILD_DIR in resolved and os.path.isfile(resolved):
-            dst_soname = os.path.join(f"{pkg_dir}/lib", soname)
-            if not os.path.lexists(dst_soname):
-                shutil.copy2(resolved, dst_soname)
-                bundled_files.add(soname)
+# Also inspect ldd output to catch any remaining build-tree libraries + libcudart.so
+# (libcudart is small ~700 KB; bundling it prevents immediate --version failures across
+# CUDA 12 <-> CUDA 13 containers).
+ldd_targets = [SERVER_BIN]
+if os.path.isfile(f"{pkg_dir}/lib/libggml-cuda.so"):
+    ldd_targets.append(f"{pkg_dir}/lib/libggml-cuda.so")
+for ldd_target in ldd_targets:
+    r = sh(["ldd", ldd_target], check=False, capture=True)
+    if r.returncode == 0:
+        for line in r.stdout.splitlines():
+            if "=>" not in line:
+                continue
+            parts = line.split("=>")
+            soname = parts[0].strip()
+            resolved = parts[1].strip().split(" ")[0]
+            if resolved and os.path.isabs(resolved) and os.path.isfile(resolved):
+                if BUILD_DIR in resolved or soname.startswith("libcudart.so"):
+                    dst_soname = os.path.join(f"{pkg_dir}/lib", soname)
+                    if not os.path.lexists(dst_soname):
+                        shutil.copy2(os.path.realpath(resolved), dst_soname)
+                        bundled_files.add(soname)
 
 print(f"  Bundled {len(bundled_files)} project shared library entries into lib/:", flush=True)
 for f_name in sorted(bundled_files):

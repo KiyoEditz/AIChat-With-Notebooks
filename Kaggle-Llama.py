@@ -338,6 +338,8 @@ def verify_prebuilt(pkg_dir):
     os.chmod(run_sh, 0o755)
     os.chmod(f"{pkg_dir}/llama-server", 0o755)
 
+    ensure_prebuilt_cuda_libs(pkg_dir)
+
     r = sh(f"{run_sh} --version", check=False, capture=True)
     if r.returncode != 0:
         raise RuntimeError(f"prebuilt binary failed a real --version run (exit {r.returncode}): {r.stderr[:200]}")
@@ -345,6 +347,94 @@ def verify_prebuilt(pkg_dir):
     print(f"  \u2705 Prebuilt verified: {meta.get('llama_cpp_tag')} / covers {covered_desc} "
           f"(built {meta.get('built_at', '?')}, CUDA VMM: {meta.get('cuda_vmm', 'unknown')})")
     return run_sh
+
+
+def ensure_prebuilt_cuda_libs(pkg_dir):
+    lib_dir = f"{pkg_dir}/lib"
+    os.makedirs(lib_dir, exist_ok=True)
+    llama_bin = f"{pkg_dir}/llama-server"
+
+    def find_missing_cuda_sonames():
+        ld_env = f"{lib_dir}:{os.environ.get('LD_LIBRARY_PATH', '')}"
+        targets = [llama_bin] + glob.glob(f"{lib_dir}/libggml-cuda.so*")
+        missing = set()
+        for t in targets:
+            if not os.path.isfile(t):
+                continue
+            r = sh(f'LD_LIBRARY_PATH="{ld_env}" ldd "{t}"', check=False, capture=True)
+            if r.returncode != 0:
+                continue
+            for line in r.stdout.splitlines():
+                if "=> not found" in line:
+                    soname = line.split("=>")[0].strip()
+                    if any(soname.startswith(p) for p in ("libcudart.so", "libcublas.so", "libcublasLt.so")):
+                        missing.add(soname)
+        return sorted(missing)
+
+    missing = find_missing_cuda_sonames()
+    if not missing:
+        return
+
+    print(f"  \u231b Resolving CUDA runtime libraries for prebuilt: {', '.join(missing)}...")
+
+    search_dirs = (
+        glob.glob("/tmp/cuda-compat-cu*/nvidia/*/lib")
+        + glob.glob("/usr/local/lib/python*/*-packages/nvidia/*/lib")
+        + glob.glob(f"{sys.prefix}/lib/python*/*-packages/nvidia/*/lib")
+        + glob.glob("/opt/conda/lib/python*/site-packages/nvidia/*/lib")
+        + glob.glob("/usr/local/cuda*/targets/x86_64-linux/lib")
+        + glob.glob("/usr/local/cuda*/lib64")
+        + ["/opt/conda/lib", "/usr/lib/x86_64-linux-gnu"]
+    )
+
+    def link_from_dirs(dirs_to_scan):
+        for d in dirs_to_scan:
+            if not os.path.isdir(d):
+                continue
+            for f_name in os.listdir(d):
+                if any(f_name.startswith(p) for p in ("libcudart.so", "libcublas.so", "libcublasLt.so")):
+                    src = os.path.join(d, f_name)
+                    dst = os.path.join(lib_dir, f_name)
+                    if os.path.isfile(src) and not os.path.lexists(dst):
+                        try:
+                            os.symlink(os.path.realpath(src), dst)
+                        except Exception:
+                            shutil.copy2(src, dst)
+
+    link_from_dirs(search_dirs)
+    missing = find_missing_cuda_sonames()
+    if not missing:
+        print("  \u2705 Linked CUDA runtime libraries from local environment.")
+        return
+
+    cu_major = "12"
+    for m_name in missing:
+        parts = m_name.split(".so.")
+        if len(parts) >= 2 and parts[1].split(".")[0].isdigit():
+            cu_major = parts[1].split(".")[0]
+            break
+
+    compat_dir = f"/tmp/cuda-compat-cu{cu_major}"
+    pkgs = [f"nvidia-cuda-runtime-cu{cu_major}", f"nvidia-cublas-cu{cu_major}"]
+    print(f"  \u231b Installing {', '.join(pkgs)} for prebuilt compatibility...")
+    sh(
+        [
+            sys.executable,
+            "-m",
+            "pip",
+            "install",
+            "-q",
+            "--no-cache-dir",
+            "--no-deps",
+            "--target",
+            compat_dir,
+        ]
+        + pkgs,
+        check=False,
+    )
+    link_from_dirs(glob.glob(f"{compat_dir}/nvidia/*/lib"))
+    if not find_missing_cuda_sonames():
+        print(f"  \u2705 Installed and linked CUDA {cu_major} runtime libraries.")
 
 
 def resolve_prebuilt_url():
@@ -827,7 +917,7 @@ try:
         f"--api-key {API_KEY} "
         f"--ctx-size {NUM_CTX} "
         f"--parallel {PARALLEL_SLOTS} "
-        f"--no-mmap "
+        f"--load-mode none "
         f"--cache-ram {CACHE_RAM} "
         f"--flash-attn on -ctk q8_0 -ctv q8_0 "
         f"-ngl 99 --split-mode layer "
