@@ -1284,25 +1284,40 @@ app.put('/api/groups/:groupId/memory', (req, res) => {
  * Cloudflare free tunnels timeout at ~100s (error 524).
  * This retries up to maxRetries times with increasing wait.
  */
-async function fetchWithRetry(url, options, maxRetries = 2) {
-    const TIMEOUT_MS = 120000; // 120 seconds per attempt
-    const RETRYABLE_CODES = [524, 502, 503, 504, 408];
+async function fetchWithRetry(url, options = {}, maxRetries = 3) {
+    const TIMEOUT_MS = 180000; // 180 seconds per attempt (31B/32B models with 30+ messages can take >90s)
+    const RETRYABLE_CODES = [524, 502, 503, 504, 408, 429];
+    const RETRYABLE_SOCKET_ERRORS = new Set([
+        'ECONNRESET',
+        'ECONNREFUSED',
+        'EPIPE',
+        'ETIMEDOUT',
+        'UND_ERR_SOCKET',
+        'UND_ERR_CONNECT_Timeout',
+        'UND_ERR_HEADERS_TIMEOUT',
+        'UND_ERR_BODY_TIMEOUT'
+    ]);
 
     for (let attempt = 0; attempt <= maxRetries; attempt++) {
         const controller = new AbortController();
         const timeoutId = setTimeout(() => controller.abort(), TIMEOUT_MS);
         try {
+            const mergedHeaders = {
+                'Connection': 'close', // Prevent Node.js undici from reusing stale keep-alive TLS sockets dropped by Cloudflare edge
+                ...(options.headers || {})
+            };
             const response = await fetch(url, {
                 ...options,
+                headers: mergedHeaders,
                 signal: controller.signal
             });
 
             clearTimeout(timeoutId);
 
-            // If retryable error and not last attempt, retry
+            // If retryable HTTP status code and not last attempt, retry
             if (RETRYABLE_CODES.includes(response.status) && attempt < maxRetries) {
-                const waitSec = (attempt + 1) * 5;
-                console.log(`⚠️  Got ${response.status}, retrying in ${waitSec}s... (attempt ${attempt + 1}/${maxRetries})`);
+                const waitSec = (attempt + 1) * 4;
+                console.log(`⚠️  Got HTTP ${response.status}, retrying in ${waitSec}s... (attempt ${attempt + 1}/${maxRetries})`);
                 await new Promise(r => setTimeout(r, waitSec * 1000));
                 continue;
             }
@@ -1310,10 +1325,20 @@ async function fetchWithRetry(url, options, maxRetries = 2) {
             return response;
 
         } catch (err) {
-            clearTimeout(timeoutId); // was previously only cleared on the success path — leaked on every error
-            if (err.name === 'AbortError' && attempt < maxRetries) {
-                const waitSec = (attempt + 1) * 5;
-                console.log(`⚠️  Request timed out, retrying in ${waitSec}s... (attempt ${attempt + 1}/${maxRetries})`);
+            clearTimeout(timeoutId);
+            const causeCode = err?.cause?.code || err?.code || '';
+            const isSocketReset =
+                RETRYABLE_SOCKET_ERRORS.has(causeCode) ||
+                /ECONNRESET|socket hang up|other side closed|fetch failed/i.test(
+                    `${err?.message || ''} ${err?.cause?.message || ''}`
+                );
+
+            if ((err.name === 'AbortError' || isSocketReset) && attempt < maxRetries) {
+                const waitSec = err.name === 'AbortError' ? (attempt + 1) * 5 : 2 * (attempt + 1);
+                const reason = err.name === 'AbortError'
+                    ? 'Request timed out'
+                    : `Socket reset (${causeCode || err.message})`;
+                console.log(`⚠️  ${reason}, retrying with fresh connection in ${waitSec}s... (attempt ${attempt + 1}/${maxRetries})`);
                 await new Promise(r => setTimeout(r, waitSec * 1000));
                 continue;
             }
