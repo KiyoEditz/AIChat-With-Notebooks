@@ -40,3 +40,7 @@ Kaggle-Llama-RAM-Private.py
 Collab-Llama-RAM-Private.py
 Molab-Llama.py
 Build-Molab-CUDA-Release.py
+
+# Kaggle Kernel Beta credentials & staging
+kaggle-kernel/config/kaggle.json
+kaggle-kernel/.staging/

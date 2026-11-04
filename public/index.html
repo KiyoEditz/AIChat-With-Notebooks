@@ -5,12 +5,10 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>AI Character Chat — Local</title>
-    <meta name="description" content="Local AI Character Chat connected to Google Colab LLM Server">
+    <meta name="description" content="Local-first AI Character Chat connected to your self-hosted LLM server">
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link
-        href="https://fonts.googleapis.com/css2?family=Newsreader:ital,opsz,wght@0,6..72,400;0,6..72,500;0,6..72,600;1,6..72,400&family=Inter:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap"
-        rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:ital,wght@0,400;0,500;0,600;0,700;1,400;1,500&family=Roboto:ital,wght@0,400;0,500;1,400&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="/styles.css">
     <script src="/theme.js"></script>
 </head>
@@ -18,22 +16,21 @@
 <body>
     <div id="app">
         <!-- ═══ SIDEBAR ═══ -->
-        <aside id="sidebar" class="sidebar">
+        <aside id="sidebar" class="sidebar" aria-label="Sidebar navigation">
             <div class="sidebar-header">
                 <div class="logo">
                     <span class="logo-icon">✦</span>
                     <span class="logo-text">AI Chat</span>
                 </div>
                 <div class="sidebar-header-actions">
-                    <a href="/donate.html" class="btn-icon" id="btn-sidebar-donate" title="Donasi / Dukung Proyek" style="text-decoration:none">
-                        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <a href="/donate.html" class="btn-icon" id="btn-sidebar-donate" title="Support Project" style="text-decoration:none">
+                        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8">
                             <path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z" />
                         </svg>
                     </a>
-                    <button class="btn-icon" id="btn-settings" title="Settings">
-                        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                            <path
-                                d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z" />
+                    <button class="btn-icon" id="btn-settings" title="Settings" aria-label="Settings">
+                        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8">
+                            <path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z" />
                             <circle cx="12" cy="12" r="3" />
                         </svg>
                     </button>
@@ -41,38 +38,38 @@
             </div>
 
             <!-- Sidebar Navigation Tabs -->
-            <div class="sidebar-tabs">
-                <button class="sidebar-tab active" id="tab-btn-characters" onclick="switchSidebarTab('characters')">
-                    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
-                    <span data-i18n="sidebar.tab_characters">Karakter</span>
+            <div class="sidebar-tabs" role="tablist">
+                <button class="sidebar-tab active" id="tab-btn-characters" role="tab" aria-selected="true" onclick="switchSidebarTab('characters')">
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
+                    <span data-i18n="sidebar.tab_characters">Characters</span>
                 </button>
-                <button class="sidebar-tab" id="tab-btn-groups" onclick="switchSidebarTab('groups')">
-                    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
-                    <span data-i18n="sidebar.tab_groups">Grup Chat</span>
+                <button class="sidebar-tab" id="tab-btn-groups" role="tab" aria-selected="false" onclick="switchSidebarTab('groups')">
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
+                    <span data-i18n="sidebar.tab_groups">Group Chats</span>
                 </button>
             </div>
 
             <!-- Panel 1: Characters & 1-on-1 Chats -->
             <div id="sidebar-panel-characters" class="sidebar-panel active">
                 <button class="btn-new-character" id="btn-new-character">
-                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                         <line x1="12" y1="5" x2="12" y2="19" />
                         <line x1="5" y1="12" x2="19" y2="12" />
                     </svg>
-                    <span data-i18n="sidebar.new_character">Karakter Baru</span>
+                    <span data-i18n="sidebar.new_character">New Character</span>
                 </button>
 
-                <div class="sidebar-section-title" data-i18n="sidebar.characters">Karakter</div>
+                <div class="sidebar-section-title" data-i18n="sidebar.characters">Characters</div>
                 <div class="sidebar-search">
-                    <svg class="sidebar-search-icon" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <svg class="sidebar-search-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                         <circle cx="11" cy="11" r="8" />
                         <line x1="21" y1="21" x2="16.65" y2="16.65" />
                     </svg>
                     <input type="text" id="character-search-input" class="sidebar-search-input"
-                        placeholder="Cari karakter…" data-i18n-placeholder="sidebar.search_characters"
+                        placeholder="Search characters…" data-i18n-placeholder="sidebar.search_characters"
                         autocomplete="off">
                     <button class="sidebar-search-clear" id="btn-clear-char-search" title="Clear" style="display:none">
-                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                             <line x1="18" y1="6" x2="6" y2="18" />
                             <line x1="6" y1="6" x2="18" y2="18" />
                         </svg>
@@ -91,24 +88,24 @@
             <!-- Panel 2: Group Chats -->
             <div id="sidebar-panel-groups" class="sidebar-panel" style="display:none;">
                 <button class="btn-new-character btn-new-group" id="btn-new-group" onclick="openNewGroupModal()">
-                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                         <line x1="12" y1="5" x2="12" y2="19" />
                         <line x1="5" y1="12" x2="19" y2="12" />
                     </svg>
-                    <span data-i18n="sidebar.new_group">Grup Baru</span>
+                    <span data-i18n="sidebar.new_group">New Group</span>
                 </button>
 
-                <div class="sidebar-section-title" data-i18n="sidebar.groups">Daftar Grup</div>
+                <div class="sidebar-section-title" data-i18n="sidebar.groups">Group List</div>
                 <div class="sidebar-search">
-                    <svg class="sidebar-search-icon" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <svg class="sidebar-search-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                         <circle cx="11" cy="11" r="8" />
                         <line x1="21" y1="21" x2="16.65" y2="16.65" />
                     </svg>
                     <input type="text" id="group-search-input" class="sidebar-search-input"
-                        placeholder="Cari grup…" data-i18n-placeholder="sidebar.search_groups"
+                        placeholder="Search groups…" data-i18n-placeholder="sidebar.search_groups"
                         autocomplete="off">
                     <button class="sidebar-search-clear" id="btn-clear-group-search" title="Clear" style="display:none" onclick="clearGroupSearch()">
-                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                             <line x1="18" y1="6" x2="6" y2="18" />
                             <line x1="6" y1="6" x2="18" y2="18" />
                         </svg>
@@ -137,8 +134,8 @@
 
             <!-- Welcome Screen -->
             <div id="view-welcome" class="view active">
-                <button class="btn-icon mobile-menu-btn welcome-menu-btn" id="btn-welcome-menu" title="Menu">
-                    <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <button class="btn-icon mobile-menu-btn welcome-menu-btn" id="btn-welcome-menu" title="Toggle sidebar" aria-label="Toggle sidebar">
+                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8">
                         <line x1="3" y1="12" x2="21" y2="12" />
                         <line x1="3" y1="6" x2="21" y2="6" />
                         <line x1="3" y1="18" x2="21" y2="18" />
@@ -147,45 +144,43 @@
                 <div class="welcome-container">
                     <div class="welcome-icon">✦</div>
                     <h1 data-i18n="welcome.title">AI Character Chat</h1>
-                    <p class="welcome-subtitle" data-i18n="welcome.subtitle">Buat karakter AI custom dan chat tanpa batas.</p>
+                    <p class="welcome-subtitle" data-i18n="welcome.subtitle">Create custom AI characters and chat with them — powered by your own LLM</p>
                     <div class="welcome-steps">
                         <div class="step">
                             <div class="step-num">1</div>
                             <div class="step-text">
-                                <strong data-i18n="welcome.step1.title">Jalankan Colab Notebook</strong>
-                                <span data-i18n="welcome.step1.desc">Buka notebook dan tunggu sampai server ready</span>
+                                <strong data-i18n="welcome.step1.title">Start your LLM backend</strong>
+                                <span data-i18n="welcome.step1.desc">Run the Colab or Kaggle notebook and wait until llama-server is ready.</span>
                             </div>
                         </div>
                         <div class="step">
                             <div class="step-num">2</div>
                             <div class="step-text">
-                                <strong data-i18n="welcome.step2.title">Copy Cloudflare URL</strong>
-                                <span data-i18n="welcome.step2.desc">Paste URL ke Settings (ikon ⚙️)</span>
+                                <strong data-i18n="welcome.step2.title">Connect your backend URL</strong>
+                                <span data-i18n="welcome.step2.desc">Paste your Cloudflare tunnel URL and API key into Settings.</span>
                             </div>
                         </div>
                         <div class="step">
                             <div class="step-num">3</div>
                             <div class="step-text">
-                                <strong data-i18n="welcome.step3.title">Buat Karakter & Mulai Chat</strong>
-                                <span data-i18n="welcome.step3.desc">Atur nama, kepribadian, dan mulai percakapan!</span>
+                                <strong data-i18n="welcome.step3.title">Create a character &amp; start chatting</strong>
+                                <span data-i18n="welcome.step3.desc">Define personality, scenario, and opening dialogue to begin.</span>
                             </div>
                         </div>
                     </div>
                     <div class="welcome-actions">
                         <button class="btn-primary" id="btn-welcome-settings" onclick="document.getElementById('btn-settings').click()">
-                            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor"
-                                stroke-width="2">
-                                <path
-                                    d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z" />
+                            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                <path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z" />
                                 <circle cx="12" cy="12" r="3" />
                             </svg>
-                            <span data-i18n="welcome.btn_settings">Buka Settings</span>
+                            <span data-i18n="welcome.btn_settings">Open Settings</span>
                         </button>
                         <a href="/donate.html" class="btn-secondary btn-donate-welcome" id="btn-welcome-donate">
-                            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                                 <path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z" />
                             </svg>
-                            <span data-i18n="welcome.btn_donate">Donasi Proyek</span>
+                            <span data-i18n="welcome.btn_donate">Support Project</span>
                         </a>
                     </div>
                 </div>
@@ -194,9 +189,8 @@
             <!-- Chat View -->
             <div id="view-chat" class="view">
                 <div class="chat-header" id="chat-header">
-                    <button class="btn-icon mobile-menu-btn" id="btn-mobile-menu">
-                        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor"
-                            stroke-width="2">
+                    <button class="btn-icon mobile-menu-btn" id="btn-mobile-menu" title="Toggle sidebar" aria-label="Toggle sidebar">
+                        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8">
                             <line x1="3" y1="12" x2="21" y2="12" />
                             <line x1="3" y1="6" x2="21" y2="6" />
                             <line x1="3" y1="18" x2="21" y2="18" />
@@ -208,24 +202,21 @@
                         <span class="chat-header-status" id="chat-header-status" data-i18n="chat.status.online">Online</span>
                     </div>
                     <div class="chat-header-actions">
-                        <button class="btn-icon" id="btn-new-chat" title="New Chat">
-                            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor"
-                                stroke-width="2">
+                        <button class="btn-icon" id="btn-new-chat" title="New Chat" aria-label="New Chat">
+                            <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8">
                                 <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
                                 <line x1="12" y1="8" x2="12" y2="14" />
                                 <line x1="9" y1="11" x2="15" y2="11" />
                             </svg>
                         </button>
-                        <button class="btn-icon" id="btn-edit-character" title="Edit Character">
-                            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor"
-                                stroke-width="2">
+                        <button class="btn-icon" id="btn-edit-character" title="Edit Character" aria-label="Edit Character">
+                            <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8">
                                 <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7" />
                                 <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z" />
                             </svg>
                         </button>
-                        <button class="btn-icon" id="btn-memory-view" title="View Memory">
-                            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor"
-                                stroke-width="2">
+                        <button class="btn-icon" id="btn-memory-view" title="View Memory" aria-label="View Memory">
+                            <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8">
                                 <path d="M12 2a10 10 0 1 0 10 10A10 10 0 0 0 12 2z" />
                                 <path d="M12 6v6l4 2" />
                             </svg>
@@ -237,26 +228,35 @@
                     <!-- Messages populated by JS -->
                 </div>
 
+                <button type="button" class="jump-latest-btn" id="btn-jump-latest" title="Scroll to bottom" aria-label="Scroll to bottom">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+                        <line x1="12" y1="5" x2="12" y2="19" />
+                        <polyline points="19 12 12 19 5 12" />
+                    </svg>
+                </button>
+
                 <div class="chat-input-container">
                     <div class="typing-indicator" id="typing-indicator" style="display:none">
                         <span class="typing-dot"></span>
                         <span class="typing-dot"></span>
                         <span class="typing-dot"></span>
-                        <span class="typing-text" data-i18n="chat.typing">sedang mengetik...</span>
+                        <span class="typing-text" data-i18n="chat.typing">typing...</span>
                     </div>
                     <div class="group-speaker-container" id="group-speaker-container" style="display:none;">
                         <div class="speaker-chips" id="group-speaker-chips">
                             <!-- Populated by JS -->
                         </div>
-                        <button type="button" class="btn-take-turn" id="btn-take-turn" onclick="triggerActiveSpeakerTurn()" title="Karakter langsung berbicara menanggapi obrolan sebelumnya">
-                            <span>⚡</span> <span data-i18n="chat.take_turn">Giliran Bicara</span>
+                        <button type="button" class="btn-take-turn" id="btn-take-turn" onclick="triggerActiveSpeakerTurn()" title="Trigger active character response">
+                            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                <polygon points="5 3 19 12 5 21 5 3" />
+                            </svg>
+                            <span data-i18n="chat.take_turn">Take Turn</span>
                         </button>
                     </div>
                     <form id="chat-form" class="chat-input-form">
-                        <textarea id="chat-input" placeholder="Ketik pesan..." data-i18n-placeholder="chat.input_placeholder" rows="1"></textarea>
-                        <button type="submit" class="btn-send" id="btn-send">
-                            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor"
-                                stroke-width="2">
+                        <textarea id="chat-input" placeholder="Type a message..." data-i18n-placeholder="chat.input_placeholder" rows="1"></textarea>
+                        <button type="submit" class="btn-send" id="btn-send" title="Send message" aria-label="Send message">
+                            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                                 <line x1="22" y1="2" x2="11" y2="13" />
                                 <polygon points="22 2 15 22 11 13 2 9 22 2" />
                             </svg>
@@ -268,12 +268,12 @@
     </div>
 
     <!-- ═══ MODAL: Character Editor ═══ -->
-    <div class="modal-overlay" id="modal-character">
+    <div class="modal-overlay" id="modal-character" role="dialog" aria-modal="true" aria-labelledby="char-modal-title">
         <div class="modal modal-large">
             <div class="modal-header">
-                <h2 id="char-modal-title" data-i18n="char_edit.title_new">✨ Buat Karakter Baru</h2>
-                <button class="btn-icon modal-close" onclick="closeModal('modal-character')">
-                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <h2 id="char-modal-title" data-i18n="char_edit.title_new">Create New Character</h2>
+                <button class="btn-icon modal-close" onclick="closeModal('modal-character')" aria-label="Close">
+                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                         <line x1="18" y1="6" x2="6" y2="18" />
                         <line x1="6" y1="6" x2="18" y2="18" />
                     </svg>
@@ -284,111 +284,111 @@
 
                 <div class="form-row">
                     <div class="form-group flex-1">
-                        <label for="char-name" data-i18n="char_edit.name">📛 Nama Karakter</label>
-                        <input type="text" id="char-name" placeholder="Contoh: Luna, Sakura, Aiden..." data-i18n-placeholder="char_edit.name_placeholder"
+                        <label for="char-name" data-i18n="char_edit.name">Character Name</label>
+                        <input type="text" id="char-name" placeholder="E.g.: Luna, Sakura, Aiden..." data-i18n-placeholder="char_edit.name_placeholder"
                             class="form-input">
                     </div>
                     <div class="form-group flex-1">
-                        <label for="char-gender" data-i18n="char_edit.gender">⚧ Gender</label>
+                        <label for="char-gender" data-i18n="char_edit.gender">Gender</label>
                         <select id="char-gender" class="form-input">
-                            <option value="" data-i18n="char_edit.gender_none">Tidak ditentukan</option>
-                            <option value="male" data-i18n="char_edit.gender_male">Laki-laki</option>
-                            <option value="female" data-i18n="char_edit.gender_female">Perempuan</option>
+                            <option value="" data-i18n="char_edit.gender_none">Not specified</option>
+                            <option value="male" data-i18n="char_edit.gender_male">Male</option>
+                            <option value="female" data-i18n="char_edit.gender_female">Female</option>
                             <option value="non-binary" data-i18n="char_edit.gender_nonbinary">Non-binary</option>
                         </select>
                     </div>
                     <div class="form-group flex-1">
-                        <label for="char-age" data-i18n="char_edit.age">🎂 Umur</label>
-                        <input type="text" id="char-age" placeholder="Contoh: 18, 20an..." data-i18n-placeholder="char_edit.age_placeholder" class="form-input">
+                        <label for="char-age" data-i18n="char_edit.age">Age</label>
+                        <input type="text" id="char-age" placeholder="E.g.: 18, 20s..." data-i18n-placeholder="char_edit.age_placeholder" class="form-input">
                     </div>
                     <div class="form-group avatar-upload-group">
-                        <label data-i18n="char_edit.avatar">🎨 Avatar</label>
+                        <label data-i18n="char_edit.avatar">Avatar</label>
                         <div class="avatar-upload-container" id="avatar-upload-container">
                             <input type="file" id="char-avatar-file" accept="image/*" class="avatar-file-input">
                             <div class="avatar-preview" id="avatar-preview">
-                                <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8">
                                     <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
                                     <polyline points="17 8 12 3 7 8"/>
                                     <line x1="12" y1="3" x2="12" y2="15"/>
                                 </svg>
                                 <span data-i18n="char_edit.avatar_upload">Upload</span>
                             </div>
-                            <button type="button" class="avatar-remove-btn" id="avatar-remove-btn" style="display:none" title="Hapus avatar" data-i18n-title="char_edit.avatar_remove">✕</button>
+                            <button type="button" class="avatar-remove-btn" id="avatar-remove-btn" style="display:none" title="Remove avatar" data-i18n-title="char_edit.avatar_remove">✕</button>
                         </div>
                         <input type="hidden" id="char-avatar">
-                        <button type="button" class="avatar-pinterest-toggle" id="avatar-pinterest-toggle" title="Cari dari Pinterest" data-i18n-title="char_edit.pinterest_toggle_title" data-i18n="char_edit.pinterest_toggle">🔎 Cari</button>
+                        <button type="button" class="avatar-pinterest-toggle" id="avatar-pinterest-toggle" title="Search from Pinterest" data-i18n-title="char_edit.pinterest_toggle_title" data-i18n="char_edit.pinterest_toggle">Search</button>
                     </div>
                 </div>
 
                 <div class="form-group pinterest-panel" id="pinterest-panel" style="display:none">
-                    <label data-i18n="char_edit.pinterest_title">🔎 Cari Avatar dari Pinterest</label>
+                    <label data-i18n="char_edit.pinterest_title">Search Avatar from Pinterest</label>
                     <div class="pinterest-search-row">
-                        <input type="text" id="pinterest-query" class="form-input" placeholder="Kata kunci pencarian..." data-i18n-placeholder="char_edit.pinterest_placeholder">
-                        <button type="button" class="btn-secondary" id="pinterest-search-btn" data-i18n="char_edit.pinterest_search">Cari</button>
+                        <input type="text" id="pinterest-query" class="form-input" placeholder="Search keyword..." data-i18n-placeholder="char_edit.pinterest_placeholder">
+                        <button type="button" class="btn-secondary" id="pinterest-search-btn" data-i18n="char_edit.pinterest_search">Search</button>
                     </div>
                     <div class="pinterest-results" id="pinterest-results" style="display:none">
                         <div class="pinterest-thumb-wrap">
                             <img id="pinterest-thumb" class="pinterest-thumb" alt="Preview">
                         </div>
                         <div class="pinterest-nav">
-                            <button type="button" class="btn-icon" id="pinterest-prev-btn" title="Sebelumnya" data-i18n-title="char_edit.pinterest_prev">‹</button>
+                            <button type="button" class="btn-icon" id="pinterest-prev-btn" title="Previous" data-i18n-title="char_edit.pinterest_prev">‹</button>
                             <span class="pinterest-counter" id="pinterest-counter">1 / 1</span>
-                            <button type="button" class="btn-icon" id="pinterest-next-btn" title="Selanjutnya" data-i18n-title="char_edit.pinterest_next">›</button>
+                            <button type="button" class="btn-icon" id="pinterest-next-btn" title="Next" data-i18n-title="char_edit.pinterest_next">›</button>
                         </div>
-                        <button type="button" class="btn-primary pinterest-use-btn" id="pinterest-use-btn" data-i18n="char_edit.pinterest_use">Gunakan Gambar Ini</button>
+                        <button type="button" class="btn-primary pinterest-use-btn" id="pinterest-use-btn" data-i18n="char_edit.pinterest_use">Use This Image</button>
                     </div>
                     <span class="form-hint" id="pinterest-status"></span>
                 </div>
 
                 <div class="form-group">
-                    <label for="char-personality" data-i18n="char_edit.personality">🧬 Kepribadian & Deskripsi</label>
+                    <label for="char-personality" data-i18n="char_edit.personality">Personality &amp; Description</label>
                     <textarea id="char-personality" rows="5"
-                        placeholder="Deskripsikan kepribadian, penampilan, sifat, dan cara bicara karakter ini secara detail..."
+                        placeholder="Describe personality, appearance, traits, and speech style in detail..."
                         data-i18n-placeholder="char_edit.personality_placeholder" class="form-input"></textarea>
-                    <span class="form-hint" data-i18n="char_edit.personality_hint">Semakin detail deskripsi, semakin konsisten karakter merespons</span>
+                    <span class="form-hint" data-i18n="char_edit.personality_hint">More details produce more consistent responses.</span>
                 </div>
 
                 <div class="form-group">
-                    <label for="char-scenario" data-i18n="char_edit.scenario">🎬 Skenario / Latar</label>
+                    <label for="char-scenario" data-i18n="char_edit.scenario">Scenario / Setting</label>
                     <textarea id="char-scenario" rows="3"
-                        placeholder="Situasi dan latar tempat saat percakapan dimulai..." data-i18n-placeholder="char_edit.scenario_placeholder" class="form-input"></textarea>
+                        placeholder="Situation and setting when the conversation starts..." data-i18n-placeholder="char_edit.scenario_placeholder" class="form-input"></textarea>
                 </div>
 
                 <div class="form-group">
-                    <label for="char-first-message" data-i18n="char_edit.first_msg">💬 Pesan Pertama</label>
+                    <label for="char-first-message" data-i18n="char_edit.first_msg">First Message</label>
                     <textarea id="char-first-message" rows="3"
-                        placeholder="Pesan pertama yang dikirim karakter saat chat baru dimulai..."
+                        placeholder="Opening message sent by the character when a new chat begins..."
                         data-i18n-placeholder="char_edit.first_msg_placeholder" class="form-input"></textarea>
                 </div>
 
                 <div class="form-group">
-                    <label for="char-example" data-i18n="char_edit.example">📝 Contoh Dialog (opsional)</label>
-                    <textarea id="char-example" rows="4" placeholder="Contoh cara karakter bicara dan merespons..."
+                    <label for="char-example" data-i18n="char_edit.example">Example Dialogue (optional)</label>
+                    <textarea id="char-example" rows="4" placeholder="Example of how the character speaks and responds..."
                         data-i18n-placeholder="char_edit.example_placeholder" class="form-input"></textarea>
                 </div>
 
                 <div class="form-group">
-                    <label for="char-system" data-i18n="char_edit.system">⚡ System Prompt Tambahan (opsional)</label>
-                    <textarea id="char-system" rows="3" placeholder="Instruksi tambahan untuk model AI..."
+                    <label for="char-system" data-i18n="char_edit.system">Additional System Prompt (optional)</label>
+                    <textarea id="char-system" rows="3" placeholder="Additional instructions for the AI model..."
                         data-i18n-placeholder="char_edit.system_placeholder" class="form-input"></textarea>
                 </div>
 
                 <div class="form-actions">
-                    <button class="btn-danger" id="btn-delete-character" style="display:none" data-i18n="char_edit.btn_delete">🗑️ Hapus</button>
+                    <button class="btn-danger" id="btn-delete-character" style="display:none" data-i18n="char_edit.btn_delete">Delete</button>
                     <div style="flex:1"></div>
-                    <button class="btn-primary" id="btn-save-character" data-i18n="char_edit.btn_save">💾 Simpan Karakter</button>
+                    <button class="btn-primary" id="btn-save-character" data-i18n="char_edit.btn_save">Save Character</button>
                 </div>
             </div>
         </div>
     </div>
 
     <!-- ═══ MODAL: Memory Viewer ═══ -->
-    <div class="modal-overlay" id="modal-memory">
+    <div class="modal-overlay" id="modal-memory" role="dialog" aria-modal="true">
         <div class="modal modal-large">
             <div class="modal-header">
-                <h2><span data-i18n="memory.title">🧠 Memory — </span><span id="memory-char-name">Character</span></h2>
-                <button class="btn-icon modal-close" onclick="closeModal('modal-memory')">
-                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <h2><span data-i18n="memory.title">Memory — </span><span id="memory-char-name">Character</span></h2>
+                <button class="btn-icon modal-close" onclick="closeModal('modal-memory')" aria-label="Close">
+                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                         <line x1="18" y1="6" x2="6" y2="18" />
                         <line x1="6" y1="6" x2="18" y2="18" />
                     </svg>
@@ -396,53 +396,53 @@
             </div>
             <div class="modal-body">
                 <div class="memory-section">
-                    <h3 data-i18n="memory.facts">📌 Fakta yang Diingat</h3>
+                    <h3 data-i18n="memory.facts">Remembered Facts</h3>
                     <div id="memory-facts" class="memory-items"></div>
                     <div class="memory-add-row">
-                        <input type="text" id="memory-new-fact" placeholder="Tambah fakta baru..." data-i18n-placeholder="memory.facts_placeholder" class="form-input">
-                        <button class="btn-secondary" id="btn-add-fact" data-i18n="memory.btn_add">+ Tambah</button>
+                        <input type="text" id="memory-new-fact" placeholder="Add new fact..." data-i18n-placeholder="memory.facts_placeholder" class="form-input">
+                        <button class="btn-secondary" id="btn-add-fact" data-i18n="memory.btn_add">+ Add</button>
                     </div>
                 </div>
 
                 <div class="memory-section persona-memory-section">
                     <div class="memory-section-top">
-                        <h3 data-i18n="memory.user_info">👤 Persona User</h3>
-                        <a href="/settings.html?tab=persona" class="btn-manage-persona" title="Kelola persona di Settings">⚙️ Kelola di Settings</a>
+                        <h3 data-i18n="memory.user_info">User Persona</h3>
+                        <a href="/settings.html?tab=persona" class="btn-manage-persona" title="Manage personas in Settings">Manage in Settings</a>
                     </div>
                     <div id="memory-persona-selector" class="memory-persona-selector"></div>
                     <div id="memory-persona-summary" class="memory-persona-summary"></div>
                 </div>
 
                 <div class="memory-section">
-                    <h3 data-i18n="memory.events">📅 Event Penting</h3>
+                    <h3 data-i18n="memory.events">Important Events</h3>
                     <div id="memory-events" class="memory-items"></div>
                     <div class="memory-add-row">
-                        <input type="text" id="memory-new-event" placeholder="Tambah event..." data-i18n-placeholder="memory.events_placeholder" class="form-input">
-                        <button class="btn-secondary" id="btn-add-event" data-i18n="memory.btn_add">+ Tambah</button>
+                        <input type="text" id="memory-new-event" placeholder="Add event..." data-i18n-placeholder="memory.events_placeholder" class="form-input">
+                        <button class="btn-secondary" id="btn-add-event" data-i18n="memory.btn_add">+ Add</button>
                     </div>
                 </div>
 
                 <div class="memory-section">
-                    <h3 data-i18n="memory.summary">📋 Ringkasan Percakapan</h3>
+                    <h3 data-i18n="memory.summary">Chat Summaries</h3>
                     <div id="memory-summaries" class="memory-items"></div>
                 </div>
 
                 <div class="form-actions">
-                    <button class="btn-secondary" id="btn-summarize-memory" data-i18n="memory.btn_ai_summary">🤖 AI Summarize Chat</button>
+                    <button class="btn-secondary" id="btn-summarize-memory" data-i18n="memory.btn_ai_summary">AI Summarize Chat</button>
                     <div style="flex:1"></div>
-                    <button class="btn-primary" id="btn-save-memory" data-i18n="memory.btn_save">💾 Simpan Memory</button>
+                    <button class="btn-primary" id="btn-save-memory" data-i18n="memory.btn_save">Save Memory</button>
                 </div>
             </div>
         </div>
     </div>
 
     <!-- ═══ MODAL: Group Editor ═══ -->
-    <div class="modal-overlay" id="modal-group">
+    <div class="modal-overlay" id="modal-group" role="dialog" aria-modal="true" aria-labelledby="group-modal-title">
         <div class="modal modal-large">
             <div class="modal-header">
-                <h2 id="group-modal-title" data-i18n="group_edit.title_new">👥 Buat Grup Baru</h2>
-                <button class="btn-icon modal-close" onclick="closeModal('modal-group')">
-                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <h2 id="group-modal-title" data-i18n="group_edit.title_new">Create New Group</h2>
+                <button class="btn-icon modal-close" onclick="closeModal('modal-group')" aria-label="Close">
+                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                         <line x1="18" y1="6" x2="6" y2="18" />
                         <line x1="6" y1="6" x2="18" y2="18" />
                     </svg>
@@ -453,65 +453,65 @@
 
                 <div class="form-row">
                     <div class="form-group flex-2">
-                        <label for="group-name" data-i18n="group_edit.name">📛 Nama Grup</label>
-                        <input type="text" id="group-name" placeholder="Contoh: KonoSuba Party, Tim Petualang..." data-i18n-placeholder="group_edit.name_placeholder" class="form-input">
+                        <label for="group-name" data-i18n="group_edit.name">Group Name</label>
+                        <input type="text" id="group-name" placeholder="E.g.: Adventure Party, Tavern Table..." data-i18n-placeholder="group_edit.name_placeholder" class="form-input">
                     </div>
                     <div class="form-group avatar-upload-group">
-                        <label data-i18n="group_edit.avatar">🎨 Icon / Avatar Grup</label>
+                        <label data-i18n="group_edit.avatar">Group Avatar</label>
                         <div class="avatar-upload-container" id="group-avatar-upload-container">
                             <input type="file" id="group-avatar-file" accept="image/*" class="avatar-file-input">
                             <div class="avatar-preview" id="group-avatar-preview">
-                                <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8">
                                     <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
                                     <polyline points="17 8 12 3 7 8"/>
                                     <line x1="12" y1="3" x2="12" y2="15"/>
                                 </svg>
                                 <span data-i18n="group_edit.avatar_upload">Upload</span>
                             </div>
-                            <button type="button" class="avatar-remove-btn" id="group-avatar-remove-btn" style="display:none" title="Hapus avatar" onclick="removeGroupAvatar()">✕</button>
+                            <button type="button" class="avatar-remove-btn" id="group-avatar-remove-btn" style="display:none" title="Remove avatar" onclick="removeGroupAvatar()">✕</button>
                         </div>
                         <input type="hidden" id="group-avatar">
-                        <button type="button" class="avatar-pinterest-toggle" id="group-avatar-pinterest-toggle" title="Cari dari Pinterest" data-i18n-title="char_edit.pinterest_toggle_title" data-i18n="char_edit.pinterest_toggle">🔎 Cari</button>
+                        <button type="button" class="avatar-pinterest-toggle" id="group-avatar-pinterest-toggle" title="Search from Pinterest" data-i18n-title="char_edit.pinterest_toggle_title" data-i18n="char_edit.pinterest_toggle">Search</button>
                     </div>
                 </div>
 
                 <div class="form-group pinterest-panel" id="group-pinterest-panel" style="display:none">
-                    <label data-i18n="char_edit.pinterest_title">🔎 Cari Avatar dari Pinterest</label>
+                    <label data-i18n="char_edit.pinterest_title">Search Avatar from Pinterest</label>
                     <div class="pinterest-search-row">
-                        <input type="text" id="group-pinterest-query" class="form-input" placeholder="Kata kunci pencarian..." data-i18n-placeholder="char_edit.pinterest_placeholder">
-                        <button type="button" class="btn-secondary" id="group-pinterest-search-btn" data-i18n="char_edit.pinterest_search">Cari</button>
+                        <input type="text" id="group-pinterest-query" class="form-input" placeholder="Search keyword..." data-i18n-placeholder="char_edit.pinterest_placeholder">
+                        <button type="button" class="btn-secondary" id="group-pinterest-search-btn" data-i18n="char_edit.pinterest_search">Search</button>
                     </div>
                     <div class="pinterest-results" id="group-pinterest-results" style="display:none">
                         <div class="pinterest-thumb-wrap">
                             <img id="group-pinterest-thumb" class="pinterest-thumb" alt="Preview">
                         </div>
                         <div class="pinterest-nav">
-                            <button type="button" class="btn-icon" id="group-pinterest-prev-btn" title="Sebelumnya" data-i18n-title="char_edit.pinterest_prev">‹</button>
+                            <button type="button" class="btn-icon" id="group-pinterest-prev-btn" title="Previous" data-i18n-title="char_edit.pinterest_prev">‹</button>
                             <span class="pinterest-counter" id="group-pinterest-counter">1 / 1</span>
-                            <button type="button" class="btn-icon" id="group-pinterest-next-btn" title="Selanjutnya" data-i18n-title="char_edit.pinterest_next">›</button>
+                            <button type="button" class="btn-icon" id="group-pinterest-next-btn" title="Next" data-i18n-title="char_edit.pinterest_next">›</button>
                         </div>
-                        <button type="button" class="btn-primary pinterest-use-btn" id="group-pinterest-use-btn" data-i18n="char_edit.pinterest_use">Gunakan Gambar Ini</button>
+                        <button type="button" class="btn-primary pinterest-use-btn" id="group-pinterest-use-btn" data-i18n="char_edit.pinterest_use">Use This Image</button>
                     </div>
                     <span class="form-hint" id="group-pinterest-status"></span>
                 </div>
 
                 <div class="form-group">
-                    <label for="group-scenario" data-i18n="group_edit.scenario">🎭 Skenario / Setting Ruangan (Shared Topic)</label>
-                    <textarea id="group-scenario" rows="2" placeholder="Contoh: Kalian sedang berkumpul di kedai setelah menyelesaikan misi..." data-i18n-placeholder="group_edit.scenario_placeholder" class="form-input"></textarea>
-                    <div class="form-hint" data-i18n="group_edit.scenario_hint">Skenario ini akan disuntikkan ke semua karakter di dalam grup agar suasana obrolan tetap konsisten.</div>
+                    <label for="group-scenario" data-i18n="group_edit.scenario">Room Scenario / Setting (Shared Topic)</label>
+                    <textarea id="group-scenario" rows="2" placeholder="E.g.: Gathered in a quiet tavern after completing a quest..." data-i18n-placeholder="group_edit.scenario_placeholder" class="form-input"></textarea>
+                    <div class="form-hint" data-i18n="group_edit.scenario_hint">Injected into all group members so the scene stays consistent.</div>
                 </div>
 
                 <div class="form-group">
                     <div class="form-group-header-row" style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">
-                        <label data-i18n="group_edit.members">👥 Pilih Anggota Karakter</label>
-                        <span class="selected-member-count" id="selected-member-count">0 terpilih</span>
+                        <label data-i18n="group_edit.members" style="margin-bottom:0">Select Character Members</label>
+                        <span class="selected-member-count" id="selected-member-count">0 selected</span>
                     </div>
-                    <div class="sidebar-search" style="margin-bottom:10px;">
+                    <div class="sidebar-search" style="margin: 0 0 10px 0;">
                         <svg class="sidebar-search-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                             <circle cx="11" cy="11" r="8" />
                             <line x1="21" y1="21" x2="16.65" y2="16.65" />
                         </svg>
-                        <input type="text" id="group-modal-member-search" class="sidebar-search-input" placeholder="Cari karakter untuk ditambahkan…" oninput="filterGroupModalMembers(this.value)">
+                        <input type="text" id="group-modal-member-search" class="sidebar-search-input" placeholder="Filter characters to add…" oninput="filterGroupModalMembers(this.value)">
                     </div>
                     <div class="group-character-picker" id="group-character-picker">
                         <!-- Populated by JS -->
@@ -519,29 +519,29 @@
                 </div>
 
                 <div class="form-actions">
-                    <button type="button" class="btn-danger" id="btn-delete-group" style="display:none;" onclick="confirmDeleteGroup()" data-i18n="btn.delete">🗑️ Hapus Grup</button>
+                    <button type="button" class="btn-danger" id="btn-delete-group" style="display:none;" onclick="confirmDeleteGroup()" data-i18n="char_edit.btn_delete">Delete Group</button>
                     <div style="flex:1"></div>
-                    <button type="button" class="btn-primary" onclick="saveGroup()" data-i18n="btn.save">💾 Simpan Grup</button>
+                    <button type="button" class="btn-primary" onclick="saveGroup()" data-i18n="btn.save">Save Group</button>
                 </div>
             </div>
         </div>
     </div>
 
     <!-- ═══ MODAL: Language Warning ═══ -->
-    <div class="modal-overlay" id="modal-lang-warning">
+    <div class="modal-overlay" id="modal-lang-warning" role="dialog" aria-modal="true">
         <div class="modal">
             <div class="modal-header">
-                <h2 data-i18n="env.warning_title">⚠️ Peringatan Konfigurasi Bahasa</h2>
-                <button class="btn-icon modal-close" onclick="closeModal('modal-lang-warning')">
-                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <h2 data-i18n="env.warning_title">Language Configuration Notice</h2>
+                <button class="btn-icon modal-close" onclick="closeModal('modal-lang-warning')" aria-label="Close">
+                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                         <line x1="18" y1="6" x2="6" y2="18" />
                         <line x1="6" y1="6" x2="18" y2="18" />
                     </svg>
                 </button>
             </div>
             <div class="modal-body" style="text-align: center;">
-                <p data-i18n="env.warning_desc" style="margin-bottom: 20px;">Bahasa yang Anda atur di .env tidak didukung atau kosong. Sistem akan menggunakan bahasa Inggris (EN) sebagai default.</p>
-                <button class="btn-primary" onclick="closeModal('modal-lang-warning')" data-i18n="env.warning_btn">Mengerti</button>
+                <p data-i18n="env.warning_desc" style="margin-bottom: 20px;">The language configured in .env is unsupported or empty. Defaulting to English (EN).</p>
+                <button class="btn-primary" onclick="closeModal('modal-lang-warning')" data-i18n="env.warning_btn">Understood</button>
             </div>
         </div>
     </div>

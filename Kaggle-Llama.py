@@ -57,7 +57,7 @@ MODEL_REPO = "mradermacher/Gemma-4-Dark-Gemistry-31B-i1-GGUF:Q6_K" # ~27 GB
 LLAMA_PORT = 8080
 API_KEY = "sk-kaggle-local"   # unchanged from kaggle_llm_server.py
 
-LLAMA_CPP_TAG = "b10605"
+LLAMA_CPP_TAG = "b12076"
 
 # CUDA_ARCH is auto-detected at runtime from the attached GPUs (see
 # detect_gpu_arch() below, called in MAIN before anything else runs) --
@@ -72,7 +72,8 @@ _FALLBACK_ARCH_IF_UNDETECTABLE = "75"   # last resort if nvidia-smi query fails
 # Leave empty to always build from source. This is a FAT multi-arch build --
 # the same URL as Collab-Llama.py's works here too, one release covers
 # every GPU type across both notebooks.
-GITHUB_RELEASE_URL = "https://github.com/KiyoEditz/AIChat-With-Notebooks/releases/download/v1.3.1/llama-cuda-multiarch-b10605.tar.gz"
+GITHUB_RELEASE_URL = "https://github.com/KiyoEditz/AIChat-With-Notebooks/releases/download/v1.4.0/llama-cuda-multiarch-b12076.tar.gz"
+GITHUB_RELEASES_API = "https://api.github.com/repos/KiyoEditz/AIChat-With-Notebooks/releases"
 # NOTE: rebuild + re-upload with Build-Llama-CUDA-Release.py's new
 # multi-arch CUDA_ARCH first -- the old single-arch (sm75) tarball won't
 # satisfy the arch-coverage check below if Kaggle ever offers non-T4 GPUs.
@@ -110,7 +111,7 @@ MIN_FREE_DISK_MARGIN_GB = 5   # bigger margin than Colab -- larger model
 # ------------------------------------------------------------------
 
 def sh(cmd, check=True, quiet=False, capture=False):
-    kw = dict(shell=True, check=check)
+    kw = dict(shell=isinstance(cmd, str), check=check)
     if capture:
         kw.update(capture_output=True, text=True)
     elif quiet:
@@ -346,16 +347,39 @@ def verify_prebuilt(pkg_dir):
     return run_sh
 
 
+def resolve_prebuilt_url():
+    wanted_name = f"llama-cuda-multiarch-{LLAMA_CPP_TAG}.tar.gz"
+    if GITHUB_RELEASE_URL:
+        try:
+            r = requests.head(GITHUB_RELEASE_URL, allow_redirects=True, timeout=15)
+            if r.status_code == 200:
+                return GITHUB_RELEASE_URL
+        except Exception:
+            pass
+    try:
+        r = requests.get(GITHUB_RELEASES_API, timeout=15)
+        if r.status_code == 200:
+            for rel in r.json():
+                for asset in rel.get("assets", []):
+                    if asset.get("name") == wanted_name and asset.get("browser_download_url"):
+                        print(f"  \u2705 Auto-discovered prebuilt in release {rel.get('tag_name')}: {wanted_name}")
+                        return asset["browser_download_url"]
+    except Exception:
+        pass
+    if GITHUB_RELEASE_URL:
+        return GITHUB_RELEASE_URL
+    raise RuntimeError("GITHUB_RELEASE_URL not set and no matching release asset found")
+
+
 def try_prebuilt():
-    if not GITHUB_RELEASE_URL:
-        raise RuntimeError("GITHUB_RELEASE_URL not set")
+    url = resolve_prebuilt_url()
 
     os.makedirs(PREBUILT_DIR, exist_ok=True)
     tarball_path = f"{PREBUILT_DIR}/prebuilt.tar.gz"
-    print(f"  \u231b Downloading prebuilt binary from GITHUB_RELEASE_URL...")
+    print(f"  \u231b Downloading prebuilt binary ({os.path.basename(url)})...")
 
     def download_step():
-        r = requests.get(GITHUB_RELEASE_URL, stream=True, timeout=30)
+        r = requests.get(url, stream=True, timeout=30)
         r.raise_for_status()
         with open(tarball_path, "wb") as f:
             for chunk in r.iter_content(chunk_size=1 << 20):
@@ -444,22 +468,28 @@ def find_cuda_driver_lib():
 
 
 def cuda_driver_cmake_flags():
-    path, is_versioned = find_cuda_driver_lib()
+    path, _is_versioned = find_cuda_driver_lib()
     if not path:
         print("  \u26a0\ufe0f No libcuda.so / libcuda.so.1 found -- will build with CUDA VMM disabled if needed.")
         return []
-    if is_versioned:
-        link_dir = "/tmp/cuda-driver-link"
-        os.makedirs(link_dir, exist_ok=True)
-        link_path = f"{link_dir}/libcuda.so"
-        if os.path.lexists(link_path):
-            os.remove(link_path)
-        os.symlink(path, link_path)
-        print(f"  Driver lib: {path} (symlinked -> {link_path})")
-    else:
-        link_path, link_dir = path, os.path.dirname(path)
-        print(f"  Driver lib: {path}")
-    return [f"-DCMAKE_LIBRARY_PATH={link_dir}", f"-DCUDA_cuda_driver_LIBRARY={link_path}"]
+    link_dir = "/tmp/cuda-driver-link"
+    os.makedirs(link_dir, exist_ok=True)
+    for name in ("libcuda.so", "libcuda.so.1"):
+        dst = f"{link_dir}/{name}"
+        if os.path.lexists(dst):
+            os.remove(dst)
+        os.symlink(os.path.realpath(path), dst)
+    curr_ld = os.environ.get("LD_LIBRARY_PATH", "")
+    if link_dir not in curr_ld.split(":"):
+        os.environ["LD_LIBRARY_PATH"] = f"{link_dir}:{curr_ld}" if curr_ld else link_dir
+    print(f"  Driver lib: {path} (symlinked -> {link_dir}/libcuda.so & libcuda.so.1)")
+    rpath_flag = f"-Wl,-rpath-link,{link_dir} -Wl,--allow-shlib-undefined"
+    return [
+        f"-DCMAKE_LIBRARY_PATH={link_dir}",
+        f"-DCUDA_cuda_driver_LIBRARY={link_dir}/libcuda.so",
+        f"-DCMAKE_EXE_LINKER_FLAGS={rpath_flag}",
+        f"-DCMAKE_SHARED_LINKER_FLAGS={rpath_flag}",
+    ]
 
 
 def build_from_source():
@@ -467,6 +497,17 @@ def build_from_source():
     if os.path.isfile(server_bin):
         print(f"  \u2705 Source build already cached at {server_bin} -- skipping rebuild")
         return server_bin
+
+    shutil.rmtree("/tmp/cuda-toolkit", ignore_errors=True)
+    for _env_key in ("PATH", "LD_LIBRARY_PATH"):
+        if _env_key in os.environ:
+            os.environ[_env_key] = ":".join(
+                p for p in os.environ[_env_key].split(":") if p and "/tmp/cuda-toolkit" not in p
+            )
+    if os.path.isdir("/usr/local/cuda"):
+        os.environ["CUDA_HOME"] = "/usr/local/cuda"
+        os.environ["CUDA_PATH"] = "/usr/local/cuda"
+        os.environ["CUDAToolkit_ROOT"] = "/usr/local/cuda"
 
     print("  Installing build tools (cmake, build-essential)...")
     sh("apt-get update -qq && apt-get install -y -qq cmake build-essential git", check=False, quiet=True)
@@ -477,8 +518,18 @@ def build_from_source():
 
     def clone_step():
         sh(f"rm -rf {LLAMA_SRC_DIR}", check=False, quiet=True)
-        sh(f"git clone --depth 1 --branch {LLAMA_CPP_TAG} "
-           f"https://github.com/ggml-org/llama.cpp.git {LLAMA_SRC_DIR}")
+        sh(
+            [
+                "git",
+                "clone",
+                "--depth",
+                "1",
+                "--branch",
+                LLAMA_CPP_TAG,
+                "https://github.com/ggml-org/llama.cpp.git",
+                LLAMA_SRC_DIR,
+            ]
+        )
 
     print(f"  \u231b Cloning llama.cpp @ {LLAMA_CPP_TAG}...")
     run_with_retry(clone_step, label="git clone")
@@ -488,23 +539,50 @@ def build_from_source():
 
     def configure(extra_flags):
         sh(f"rm -rf {LLAMA_SRC_DIR}/build", check=False, quiet=True)
-        return sh(
-            f'cmake -B {LLAMA_SRC_DIR}/build -S {LLAMA_SRC_DIR} '
-            f'-DGGML_CUDA=ON -DCMAKE_CUDA_ARCHITECTURES="{CUDA_ARCH}" '
-            f'-DCMAKE_BUILD_TYPE=Release '
-            f'-DLLAMA_BUILD_TESTS=OFF -DLLAMA_BUILD_EXAMPLES=OFF '
-            + " ".join(extra_flags),
-            check=False,
-        ).returncode == 0
+        cmd = [
+            "cmake",
+            "-B",
+            f"{LLAMA_SRC_DIR}/build",
+            "-S",
+            LLAMA_SRC_DIR,
+            "-DGGML_CUDA=ON",
+            f"-DCMAKE_CUDA_ARCHITECTURES={CUDA_ARCH}",
+            "-DCMAKE_BUILD_TYPE=Release",
+            "-DLLAMA_BUILD_TESTS=OFF",
+            "-DLLAMA_BUILD_EXAMPLES=OFF",
+        ]
+        if os.path.isdir("/usr/local/cuda"):
+            cmd.append("-DCUDAToolkit_ROOT=/usr/local/cuda")
+        if os.path.isfile("/usr/local/cuda/bin/nvcc"):
+            cmd.append("-DCMAKE_CUDA_COMPILER=/usr/local/cuda/bin/nvcc")
+        cmd += extra_flags
+        return sh(cmd, check=False).returncode == 0
 
-    if not configure(driver_flags):
-        print("  \u26a0\ufe0f Configure failed with the CUDA driver library -- retrying with "
-              "GGML_CUDA_NO_VMM=ON.")
-        if not configure(["-DGGML_CUDA_NO_VMM=ON"]):
-            raise RuntimeError("CMake configure failed even with CUDA VMM disabled -- see the build log above.")
+    def compile_step():
+        nproc = min(os.cpu_count() or 4, 4)
+        print("  \u231b Compiling llama-server (~5-10 min for single arch)...")
+        return (
+            sh(
+                [
+                    "cmake",
+                    "--build",
+                    f"{LLAMA_SRC_DIR}/build",
+                    "--config",
+                    "Release",
+                    f"-j{nproc}",
+                    "--target",
+                    "llama-server",
+                ],
+                check=False,
+            ).returncode
+            == 0
+        )
 
-    print("  \u231b Compiling llama-server...")
-    sh(f"cmake --build {LLAMA_SRC_DIR}/build --config Release -j$(nproc) --target llama-server")
+    vmm_ok = bool(driver_flags) and configure(driver_flags)
+    if not vmm_ok or not compile_step():
+        print("  \u26a0\ufe0f Retrying configure & build with GGML_CUDA_NO_VMM=ON...")
+        if not configure(["-DGGML_CUDA_NO_VMM=ON"]) or not compile_step():
+            raise RuntimeError("CMake configure/build failed even with CUDA VMM disabled -- see the build log above.")
 
     if not os.path.isfile(server_bin):
         raise RuntimeError(f"Build finished but {server_bin} was not produced")

@@ -3,6 +3,49 @@
 All notable changes to this project are documented here. Format loosely
 follows [Keep a Changelog](https://keepachangelog.com/).
 
+## [v1.7.0] — Beta Kaggle Auto-Tunnel Orchestrator, Responsive Editorial UI & CUDA 12.8/13.0 (`llama.cpp` `b12076`)
+
+Major feature and infrastructure release introducing **1-command automated Kaggle GPU orchestration (`npm run beta-kaggle`)**, a complete **Responsive Digital Typography & Warm Editorial UI Redesign**, and an upgraded **Multi-Arch CUDA Prebuilt & Source Build Engine (`llama.cpp` `b12076` / `v0.8.0`)** compatible with Kaggle's newest NVIDIA Driver `580.178.04` (CUDA 13.0 host / CUDA 12.8.93 toolkit).
+
+### Added
+- **Beta Kaggle Auto-Tunnel Orchestrator (`npm run beta-kaggle` / `kaggle-kernel/`)**:
+  - **Headless 1-Command Kaggle GPU Launch (`kaggle-kernel/orchestrator.js` & `server.js --beta-kaggle`)**:
+    - Added `"beta-kaggle": "node server.js --beta-kaggle"` in `package.json`.
+    - Automatically stages and pushes the LLM server kernel (`aichat-kaggle-server`) to Kaggle with Dual Tesla T4 GPUs (`enable_gpu: true`, `enable_internet: true`) without opening a browser or manually copying Cloudflare URLs.
+    - Full mobile/single-device support: run `npm run beta-kaggle` directly on a single device (including Termux/mobile or low-spec laptop) and AIChat automatically binds the remote Kaggle GPU endpoint into `runtimeConfig.baseUrl` & `runtimeConfig.apiKey`.
+  - **Non-Stop Dual-Channel URL Handshake (`kaggle-kernel/kernel/main.py` & `orchestrator.js`)**:
+    - Once `llama-server` and `cloudflared` pass a real 1-token completion sanity test, the kernel commits `tunnel.json` (tagged with a unique `runId`) to a private Kaggle Dataset (`<username>/aichat-kaggle-tunnel`) **from inside the running script** without stopping the kernel.
+    - Local orchestrator polls both the private dataset (`tunnel.json` with `runId` verification to reject stale URLs) and live kernel logs (`===AICHAT_TUNNEL_START===...===AICHAT_TUNNEL_END===`) as a fallback.
+  - **Internal Python Reverse Proxy Gateway & Dual-Layer Remote Shutdown (`kaggle-kernel/kernel/main.py`)**:
+    - Lightweight internal HTTP/TCP gateway (`GATEWAY_PORT = 8080` -> `LLAMA_INTERNAL_PORT = 8081`) exposed through the single Cloudflare Tunnel URL:
+      - `GET /__aichat_ping`: Heartbeat endpoint pinged every 60 seconds by the local AIChat server.
+      - `POST /__aichat_shutdown`: Instant remote shutdown endpoint triggered automatically when the local AIChat server receives `SIGINT` (`Ctrl+C`) or `SIGTERM`, terminating `llama-server` and `cloudflared` and exiting the Kaggle kernel immediately to save weekly GPU quota.
+      - **30-Minute Auto-Idle Watchdog (`IDLE_TIMEOUT_SECONDS = 1800`)**: Automatically shuts down the Kaggle kernel if no heartbeat or chat activity occurs for 30 minutes (e.g., if the local device loses power or internet), while pausing the idle timer whenever an LLM streaming generation is actively in-flight.
+  - **Credential Setup & Documentation (`kaggle-kernel/config/`)**:
+    - Added `kaggle-kernel/config/kaggle.json.example` and `kaggle-kernel/config/README.md` with step-by-step instructions for both legacy `kaggle.json` API tokens and new `KGAT_...` API tokens, protected by `.gitignore`.
+
+### Changed & Improved
+- **Responsive Digital Typography & Warm Editorial UI Redesign (`public/styles.css`, `public/settings.css`, `public/donate.css`, `public/*.html`)**:
+  - **Glare-Free Warm Paper Light Mode & Obsidian Dark Mode**:
+    - Replaced stark `#FFFFFF` backgrounds and `#000000` text in Light Mode with soft warm paper (`#F8F6F1` canvas, `#F2EFE9` surface, `#EAE6DF` assistant bubble) and deep charcoal ink (`#222222`), eliminating eye strain during extended reading.
+    - Refined Dark Mode with warm obsidian surfaces (`#0D0E12`), slate assistant bubbles (`#1A1D26`), and warm indigo user bubbles (`#252849`).
+  - **Clear Dialogue vs. Action/Narration Visual Hierarchy**:
+    - Spoken `"dialogue"` renders in crisp sans-serif (`Plus Jakarta Sans` / `Inter`) with medium weight (`450`) and primary contrast.
+    - Character `*action / narration*` (`<em class="action-text">`) renders in editorial italic serif (`Georgia, 'Times New Roman', serif`) with a warm muted terracotta (`#6E5647` in Light Mode) or warm amber-stone (`#A89F91` in Dark Mode) tone so actions and dialogue are immediately distinguishable at a glance.
+  - **Strict Line-Length Measure & Breathing Spacing**:
+    - Constrained chat bubble width to `min(78%, 65ch)` (~60–75 characters per line / ~660px) with `1.62` line-height and `16px` (`1rem`) body font size to prevent reading fatigue.
+  - **Language Translation Protection (`translate="no"` / `.notranslate`)**:
+    - Preserved native 12-language UI i18n while protecting chat message bubbles and character names from automatic browser translation.
+- **`llama.cpp` `b12076` (`v0.8.0`) Upgrade & CUDA 12.8 / Driver 580+ Build Hardening**:
+  - Upgraded `LLAMA_CPP_TAG` from `b10605` to **`b12076`** (`v0.8.0`) across `Build-Llama-CUDA-Release.py`, `kaggle-kernel/kernel/main.py`, `Kaggle-Llama.py`, `Kaggle-Llama-Private.py`, `Collab-Llama.py`, `Collab-Llama-Private.py`, `Build-Molab-CUDA-Release.py`, and `Molab-Llama.py`.
+  - **CUDA Driver & Linker Hardening (`cuda_driver_cmake_flags()` & `build_from_source()`)**:
+    - Created dual symlinks (`libcuda.so` and `libcuda.so.1`) in `/tmp/cuda-driver-link` with `-Wl,-rpath-link,/tmp/cuda-driver-link -Wl,--allow-shlib-undefined` so both CMake's `CUDA::cuda_driver` target and GNU `ld`'s transitive `DT_NEEDED` resolution succeed on Kaggle's NVIDIA Driver `580.178.04` (CUDA 13.0 host / CUDA 12.8.93 toolkit).
+    - Passed CMake arguments as a Python list (`shell=False`) so semicolon-separated multi-arch strings (`75-real;80-real;86-real;89-real;90-real;90-virtual`) are never split by `/bin/sh`.
+    - Isolated multi-arch compilation inside `/kaggle/tmp` (`/tmp`) scratch storage to prevent exhausting `/kaggle/working`'s 19.5 GB quota, and documented the ~1 hour 30 minutes one-time build duration on Kaggle's 4-core CPU.
+    - Added `resolve_prebuilt_url()` to automatically discover `llama-cuda-multiarch-b12076.tar.gz` across GitHub Releases on `KiyoEditz/AIChat-With-Notebooks`.
+
+---
+
 ## [v1.6.1] — Bug Fixes & Stability Hardening
 
 Comprehensive bug fix and stability release addressing concurrency race conditions, markdown rendering fidelity, group chat session preservation, and memory/persona synchronization.

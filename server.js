@@ -72,10 +72,32 @@ function readJSON(filePath, fallback = null) {
     }
 }
 
+let _writeCounter = 0;
+
 function writeJSON(filePath, data) {
-    const tmpPath = `${filePath}.${process.pid}.${Date.now()}.tmp`;
+    const tmpPath = `${filePath}.${process.pid}.${Date.now()}.${++_writeCounter}.tmp`;
     fs.writeFileSync(tmpPath, JSON.stringify(data, null, 2), 'utf8');
-    fs.renameSync(tmpPath, filePath); // atomic on POSIX filesystems — no partial-write window
+    let lastErr = null;
+    for (let attempt = 0; attempt < 3; attempt++) {
+        try {
+            fs.renameSync(tmpPath, filePath); // atomic on POSIX filesystems — no partial-write window
+            return;
+        } catch (err) {
+            lastErr = err;
+            if (err.code !== 'EPERM' && err.code !== 'EACCES' && err.code !== 'EBUSY') {
+                break;
+            }
+        }
+    }
+    try {
+        fs.copyFileSync(tmpPath, filePath);
+    } catch (copyErr) {
+        throw lastErr || copyErr;
+    } finally {
+        try {
+            if (fs.existsSync(tmpPath)) fs.unlinkSync(tmpPath);
+        } catch { }
+    }
 }
 
 // ── Helper: get model parameters from env ────────────────────
@@ -119,33 +141,33 @@ function parseListEnv(val, defaultVal) {
 function getModelParams() {
     return {
         // Core generation
-        max_tokens:   parseValidated(process.env.MAX_TOKENS,   { type: 'int',   defaultVal: 1024, min: 1,    max: 32768, label: 'MAX_TOKENS' }),
-        temperature:  parseValidated(process.env.TEMPERATURE,  { defaultVal: 0.80, min: 0,   max: 5,   label: 'TEMPERATURE' }),
-        top_k:        parseValidated(process.env.TOP_K,        { type: 'int', defaultVal: 50,   min: 0,    max: 1000,  label: 'TOP_K' }),
-        top_p:        parseValidated(process.env.TOP_P,        { defaultVal: 0.90, min: 0,   max: 1,   label: 'TOP_P' }),
-        min_p:        parseValidated(process.env.MIN_P,        { defaultVal: 0.05, min: 0,   max: 1,   label: 'MIN_P' }),
-        typical_p:    parseValidated(process.env.TYPICAL_P,    { defaultVal: 1.0,  min: 0,   max: 1,   label: 'TYPICAL_P' }),
-        tfs_z:        parseValidated(process.env.TFS_Z,        { defaultVal: 1.0,  min: 0,   max: 1,   label: 'TFS_Z' }),
-        top_n_sigma:  parseValidated(process.env.TOP_N_SIGMA,  { defaultVal: -1,   min: -1,  max: 100, label: 'TOP_N_SIGMA' }),
+        max_tokens: parseValidated(process.env.MAX_TOKENS, { type: 'int', defaultVal: 1024, min: 1, max: 32768, label: 'MAX_TOKENS' }),
+        temperature: parseValidated(process.env.TEMPERATURE, { defaultVal: 0.80, min: 0, max: 5, label: 'TEMPERATURE' }),
+        top_k: parseValidated(process.env.TOP_K, { type: 'int', defaultVal: 50, min: 0, max: 1000, label: 'TOP_K' }),
+        top_p: parseValidated(process.env.TOP_P, { defaultVal: 0.90, min: 0, max: 1, label: 'TOP_P' }),
+        min_p: parseValidated(process.env.MIN_P, { defaultVal: 0.05, min: 0, max: 1, label: 'MIN_P' }),
+        typical_p: parseValidated(process.env.TYPICAL_P, { defaultVal: 1.0, min: 0, max: 1, label: 'TYPICAL_P' }),
+        tfs_z: parseValidated(process.env.TFS_Z, { defaultVal: 1.0, min: 0, max: 1, label: 'TFS_Z' }),
+        top_n_sigma: parseValidated(process.env.TOP_N_SIGMA, { defaultVal: -1, min: -1, max: 100, label: 'TOP_N_SIGMA' }),
 
         // Windowed repetition control — bounded to the last N tokens, not
         // the whole conversation. This is the direct fix for the original
         // "common words get suppressed over a long chat" concern.
-        repeat_last_n:  parseValidated(process.env.REPEAT_LAST_N,  { type: 'int', defaultVal: 256,  min: 0, max: 8192, label: 'REPEAT_LAST_N' }),
-        repeat_penalty: parseValidated(process.env.REPEAT_PENALTY, { defaultVal: 1.05, min: 0, max: 3,    label: 'REPEAT_PENALTY' }),
+        repeat_last_n: parseValidated(process.env.REPEAT_LAST_N, { type: 'int', defaultVal: 256, min: 0, max: 8192, label: 'REPEAT_LAST_N' }),
+        repeat_penalty: parseValidated(process.env.REPEAT_PENALTY, { defaultVal: 1.05, min: 0, max: 3, label: 'REPEAT_PENALTY' }),
 
         // OpenAI-style, cumulative over the WHOLE context by spec. Default
         // to 0 (disabled) on purpose — see README for why. Must match the
         // notebook scripts' defaults exactly.
-        presence_penalty:  parseValidated(process.env.PRESENCE_PENALTY,  { defaultVal: 0.0, min: -2, max: 2, label: 'PRESENCE_PENALTY' }),
+        presence_penalty: parseValidated(process.env.PRESENCE_PENALTY, { defaultVal: 0.0, min: -2, max: 2, label: 'PRESENCE_PENALTY' }),
         frequency_penalty: parseValidated(process.env.FREQUENCY_PENALTY, { defaultVal: 0.0, min: -2, max: 2, label: 'FREQUENCY_PENALTY' }),
 
         // DRY sampling — penalizes repeated phrases/loops, not individual
         // common tokens. The purpose-built fix for long roleplay chats.
-        dry_multiplier:        parseValidated(process.env.DRY_MULTIPLIER,       { defaultVal: 0.8,  min: 0, max: 5,    label: 'DRY_MULTIPLIER' }),
-        dry_base:              parseValidated(process.env.DRY_BASE,             { defaultVal: 1.75, min: 1, max: 4,    label: 'DRY_BASE' }),
-        dry_allowed_length:    parseValidated(process.env.DRY_ALLOWED_LENGTH,   { type: 'int', defaultVal: 2,    min: 1, max: 50,   label: 'DRY_ALLOWED_LENGTH' }),
-        dry_penalty_last_n:    parseValidated(process.env.DRY_PENALTY_LAST_N,   { type: 'int', defaultVal: 1024, min: -1, max: 16384, label: 'DRY_PENALTY_LAST_N' }),
+        dry_multiplier: parseValidated(process.env.DRY_MULTIPLIER, { defaultVal: 0.8, min: 0, max: 5, label: 'DRY_MULTIPLIER' }),
+        dry_base: parseValidated(process.env.DRY_BASE, { defaultVal: 1.75, min: 1, max: 4, label: 'DRY_BASE' }),
+        dry_allowed_length: parseValidated(process.env.DRY_ALLOWED_LENGTH, { type: 'int', defaultVal: 2, min: 1, max: 50, label: 'DRY_ALLOWED_LENGTH' }),
+        dry_penalty_last_n: parseValidated(process.env.DRY_PENALTY_LAST_N, { type: 'int', defaultVal: 1024, min: -1, max: 16384, label: 'DRY_PENALTY_LAST_N' }),
         dry_sequence_breakers: parseListEnv(process.env.DRY_SEQUENCE_BREAKERS, ["\n", ":", "\"", "*"]),
 
         // XTC — trims away the single most-probable token some of the time,
@@ -153,7 +175,7 @@ function getModelParams() {
         // 0) since it's more experimental / can occasionally cut off short
         // valid replies; conservative default per spec.
         xtc_probability: parseValidated(process.env.XTC_PROBABILITY, { defaultVal: 0.0, min: 0, max: 1, label: 'XTC_PROBABILITY' }),
-        xtc_threshold:   parseValidated(process.env.XTC_THRESHOLD,   { defaultVal: 0.1, min: 0, max: 1, label: 'XTC_THRESHOLD' }),
+        xtc_threshold: parseValidated(process.env.XTC_THRESHOLD, { defaultVal: 0.1, min: 0, max: 1, label: 'XTC_THRESHOLD' }),
 
         // Dynamic temperature
         dynatemp_range: parseValidated(process.env.DYNATEMP_RANGE, { defaultVal: 0.0, min: 0, max: 5, label: 'DYNATEMP_RANGE' }),
@@ -161,8 +183,8 @@ function getModelParams() {
 
         // Mirostat — off (0) by default; when on, it takes over from
         // top_k/top_p/temperature, so it's opt-in only via env.
-        mirostat:    parseValidated(process.env.MIROSTAT,    { type: 'int', defaultVal: 0,   min: 0, max: 2,  label: 'MIROSTAT' }),
-        mirostat_lr: parseValidated(process.env.MIROSTAT_LR, { defaultVal: 0.1, min: 0, max: 5,  label: 'MIROSTAT_LR' }),
+        mirostat: parseValidated(process.env.MIROSTAT, { type: 'int', defaultVal: 0, min: 0, max: 2, label: 'MIROSTAT' }),
+        mirostat_lr: parseValidated(process.env.MIROSTAT_LR, { defaultVal: 0.1, min: 0, max: 5, label: 'MIROSTAT_LR' }),
         mirostat_ent: parseValidated(process.env.MIROSTAT_ENT, { defaultVal: 5.0, min: 0, max: 20, label: 'MIROSTAT_ENT' }),
 
         // Reproducibility / sampler chain
@@ -181,10 +203,14 @@ function cleanAssistantResponse(text) {
     if (process.env.ENABLE_THINKING === 'true') {
         return text;
     }
+    const hadThinkTag = /<think>/i.test(text);
     // Strip complete <think>...</think> tags
     let cleaned = text.replace(/<think>[\s\S]*?<\/think>/gi, '');
     // Strip unclosed <think> tag if output was cut off mid-thought
     cleaned = cleaned.replace(/<think>[\s\S]*$/gi, '');
+    if (hadThinkTag) {
+        return cleaned.trim();
+    }
     return cleaned.trim() || text;
 }
 
@@ -422,10 +448,20 @@ app.put('/api/chat/:chatId', (req, res) => {
 
     let messages = existing.messages;
     if (req.body.messages !== undefined) {
-        messages = req.body.messages.map(m => ({
-            ...m,
-            id: m.id || uuidv4()
-        }));
+        const existingById = new Map((existing.messages || []).filter(em => em && em.id).map(em => [em.id, em]));
+        messages = req.body.messages.map((m, idx) => {
+            const prev = (m.id && existingById.get(m.id)) || (existing.messages || [])[idx];
+            const merged = {
+                ...(prev && prev.alternates ? { alternates: prev.alternates, selectedAlternate: prev.selectedAlternate } : {}),
+                ...m,
+                id: m.id || (prev && prev.id) || uuidv4()
+            };
+            if (Array.isArray(merged.alternates) && merged.selectedAlternate !== undefined && merged.content !== undefined) {
+                merged.alternates = [...merged.alternates];
+                merged.alternates[merged.selectedAlternate] = merged.content;
+            }
+            return merged;
+        });
     }
 
     const updated = {
@@ -588,6 +624,24 @@ app.put('/api/groups/:id', (req, res) => {
         writeJSON(path.join(sessionDir, `${firstChatId}.json`), firstChat);
     }
 
+    let groupMessages = existing.messages || [];
+    if (Array.isArray(req.body.messages) && req.body.messages.length > 0) {
+        const existingById = new Map((existing.messages || []).filter(em => em && em.id).map(em => [em.id, em]));
+        groupMessages = req.body.messages.map((m, idx) => {
+            const prev = (m.id && existingById.get(m.id)) || (existing.messages || [])[idx];
+            const merged = {
+                ...(prev && prev.alternates ? { alternates: prev.alternates, selectedAlternate: prev.selectedAlternate } : {}),
+                ...m,
+                id: m.id || (prev && prev.id) || uuidv4()
+            };
+            if (Array.isArray(merged.alternates) && merged.selectedAlternate !== undefined && merged.content !== undefined) {
+                merged.alternates = [...merged.alternates];
+                merged.alternates[merged.selectedAlternate] = merged.content;
+            }
+            return merged;
+        });
+    }
+
     const updated = {
         ...existing,
         name: typeof req.body.name === 'string' && req.body.name.trim() ? req.body.name.trim() : existing.name,
@@ -596,7 +650,7 @@ app.put('/api/groups/:id', (req, res) => {
         characterIds: Array.isArray(req.body.characterIds) ? req.body.characterIds : existing.characterIds,
         activePersonaId: req.body.activePersonaId !== undefined ? req.body.activePersonaId : existing.activePersonaId,
         // Never overwrite existing messages with an empty array
-        messages: (Array.isArray(req.body.messages) && req.body.messages.length > 0) ? req.body.messages : (existing.messages || []),
+        messages: groupMessages,
         updatedAt: new Date().toISOString()
     };
     writeJSON(fp, updated);
@@ -940,7 +994,10 @@ app.get('/api/personas/:id', (req, res) => {
 
 app.post('/api/personas', (req, res) => {
     const personas = getPersonas();
-    const nextIndex = personas.reduce((max, p) => Math.max(max, Number(p.index) || 0), 0) + 1;
+    let nextIndex = personas.reduce((max, p) => Math.max(max, Number(p.index) || 0, Number(p.id) || 0), 0) + 1;
+    while (fs.existsSync(path.join(PERSONA_DIR, `${nextIndex}.json`))) {
+        nextIndex++;
+    }
     const newId = String(nextIndex);
     const fp = safePath(PERSONA_DIR, newId);
     if (!fp) return res.status(400).json({ error: 'Invalid persona id' });
@@ -1086,13 +1143,48 @@ app.put('/api/personas/:id', (req, res) => {
 });
 
 app.delete('/api/personas/:id', (req, res) => {
-    const fp = safePath(PERSONA_DIR, req.params.id);
+    const deletedId = String(req.params.id);
+    const fp = safePath(PERSONA_DIR, deletedId);
     if (!fp || !fs.existsSync(fp)) return res.status(404).json({ error: 'Persona not found' });
     const personas = getPersonas();
     if (personas.length <= 1) {
         return res.status(400).json({ error: 'Tidak dapat menghapus persona terakhir' });
     }
     fs.unlinkSync(fp);
+
+    // Clean up dangling references to the deleted persona in memory and group files
+    try {
+        const privMemFiles = fs.readdirSync(PRIVATE_MEMORY_DIR).filter(f => f.endsWith('.json'));
+        for (const f of privMemFiles) {
+            const mFp = path.join(PRIVATE_MEMORY_DIR, f);
+            const mem = readJSON(mFp);
+            if (mem && String(mem.personaId) === deletedId) {
+                mem.personaId = null;
+                writeJSON(mFp, mem);
+            }
+        }
+        const grpMemFiles = fs.readdirSync(GROUP_MEMORY_DIR).filter(f => f.endsWith('.json'));
+        for (const f of grpMemFiles) {
+            const gmFp = path.join(GROUP_MEMORY_DIR, f);
+            const gMem = readJSON(gmFp);
+            if (gMem && String(gMem.personaId) === deletedId) {
+                gMem.personaId = null;
+                writeJSON(gmFp, gMem);
+            }
+        }
+        const grpFiles = fs.readdirSync(GROUP_CHATS_DIR).filter(f => f.endsWith('.json'));
+        for (const f of grpFiles) {
+            const gFp = path.join(GROUP_CHATS_DIR, f);
+            const grp = readJSON(gFp);
+            if (grp && String(grp.activePersonaId) === deletedId) {
+                grp.activePersonaId = null;
+                writeJSON(gFp, grp);
+            }
+        }
+    } catch (cleanupErr) {
+        console.error('Error cleaning up deleted persona references:', cleanupErr);
+    }
+
     res.json({ ok: true });
 });
 
@@ -1296,19 +1388,6 @@ app.post('/api/chat/send', async (req, res) => {
     }
     if (!Array.isArray(chat.messages)) chat.messages = [];
 
-    // Resolve any pending alternates on the last message BEFORE building the
-    // history sent to the model, so a previously-regenerated-and-selected
-    // reply is what actually gets sent — not the original/rejected content.
-    if (chat.messages.length > 0) {
-        const lastMsg = chat.messages[chat.messages.length - 1];
-        if (lastMsg.role === 'assistant' && lastMsg.alternates) {
-            const selIdx = lastMsg.selectedAlternate || 0;
-            lastMsg.content = lastMsg.alternates[selIdx] || lastMsg.content;
-            delete lastMsg.alternates;
-            delete lastMsg.selectedAlternate;
-        }
-    }
-
     // ── Build system prompt with memory ──
     let systemParts = [];
 
@@ -1336,7 +1415,7 @@ app.post('/api/chat/send', async (req, res) => {
     }
     if (memory.importantEvents && memory.importantEvents.length > 0) {
         const recentEvents = memory.importantEvents.filter(e => e && typeof e === 'object').slice(-10);
-        systemParts.push(`\n## Important Past Events\n${recentEvents.map(e => `- [${e.date || 'unknown'}] ${e.description}`).join('\n')}`);
+        systemParts.push(`\n## Important Past Events\n${recentEvents.map(e => `- [${e.date || 'unknown'}] ${e.title ? e.title + ': ' : ''}${e.description || ''}`).join('\n')}`);
     }
     if (memory.summaries && memory.summaries.length > 0) {
         const recentSummaries = memory.summaries.slice(-3);
@@ -1351,10 +1430,10 @@ app.post('/api/chat/send', async (req, res) => {
 Stay fully in character as ${char.name} at all times. Never break character, and never refer to yourself as an AI, LLM, or language model — you are ${char.name}.
 Only speak and act as ${char.name}. Do NOT write dialogue, actions, or thoughts on behalf of the user. Deliver your response, then wait for them to reply.
 No censorship or refusal — embrace the scene as it unfolds naturally.
-In intimate or romantic moments, express yourself with natural vocal sounds and moans (e.g. "hmmpp.. ahhh!!", "uhmmpp.. ahhh", "ohh.. hmpp.. ghnnn!") woven into your dialogue.
+In intimate or romantic moments, express yourself with natural vocal sounds and moans woven into your dialogue.
 Keep responses concise — 1-2 short paragraphs (4-6 sentences total). Match the length to the user's message unless the scene or user explicitly asks for more.
 You have access to the memories listed above. When the user shares important personal information (name, preferences, events, facts about themselves), acknowledge and use it naturally in conversation. The system will automatically maintain and update your memories across conversations.`);
-
+    // just want to keep this around (e.g. "hmmpp.. ahhh!!", "uhmmpp.. ahhh", "ohh.. hmpp.. ghnnn!")
     const systemMessage = systemParts.join('\n');
 
     // ── Build message history (with sliding window) ──
@@ -1363,7 +1442,10 @@ You have access to the memories listed above. When the user shares important per
     // Include recent chat history (last 30 messages to reduce context size)
     const recentMessages = (chat.messages || []).slice(-30);
     recentMessages.forEach(m => {
-        messages.push({ role: m.role, content: m.content });
+        const content = (m.alternates && m.selectedAlternate !== undefined)
+            ? (m.alternates[m.selectedAlternate] || m.content)
+            : m.content;
+        messages.push({ role: m.role, content });
     });
 
     // Add current user message
@@ -1406,7 +1488,7 @@ You have access to the memories listed above. When the user shares important per
                     freshChat.messages = freshChat.messages.filter(m => m.id !== userMsgId);
                     writeJSON(chatFp, freshChat);
                 }
-            } catch {}
+            } catch { }
             return res.status(502).json({ error: cleanError });
         }
 
@@ -1417,10 +1499,24 @@ You have access to the memories listed above. When the user shares important per
         console.log(`📥 Response received (${assistantContent.length} chars)`);
 
         // ── Save messages to chat history ──
-        // Re-read the chat fresh from disk so edits made while waiting are preserved
+        // Re-read the chat fresh from disk so edits made while waiting are preserved;
+        // if the chat was deleted while the LLM was generating, do not resurrect it.
         const freshNow = new Date().toISOString();
-        const freshChat = readJSON(chatFp) || chat;
+        const freshChat = readJSON(chatFp);
+        if (!freshChat) {
+            return res.status(404).json({ error: 'Chat was deleted' });
+        }
         if (!Array.isArray(freshChat.messages)) freshChat.messages = [];
+
+        // Strip alternates from previous assistant messages now that a new turn has succeeded
+        freshChat.messages.forEach(m => {
+            if (m.role === 'assistant' && m.alternates) {
+                const selIdx = m.selectedAlternate ?? 0;
+                m.content = m.alternates[selIdx] || m.content;
+                delete m.alternates;
+                delete m.selectedAlternate;
+            }
+        });
 
         // Ensure user message exists in freshChat
         if (!freshChat.messages.some(m => m.id === userMsgId)) {
@@ -1438,8 +1534,10 @@ You have access to the memories listed above. When the user shares important per
         freshChat.updatedAt = freshNow;
         writeJSON(chatFp, freshChat);
 
-        // ── Auto-extract memory after every exchange ──
-        autoExtractMemory(memFp, userMessage, assistantContent);
+        // ── Auto-extract memory after every exchange (only if character still exists) ──
+        if (fs.existsSync(charFp)) {
+            autoExtractMemory(memFp, userMessage, assistantContent);
+        }
 
         res.json({
             content: assistantContent,
@@ -1505,15 +1603,21 @@ app.post('/api/chat/regenerate', async (req, res) => {
         return res.status(400).json({ error: 'This chat does not belong to the given character' });
     }
 
-    const lastMsg = chat.messages[chat.messages.length - 1];
-    if (lastMsg.role !== 'assistant') {
-        return res.status(400).json({ error: 'Last message is not from assistant' });
+    const targetIndex = req.body.messageId
+        ? chat.messages.findIndex(m => m.id === req.body.messageId)
+        : chat.messages.length - 1;
+    if (targetIndex === -1) {
+        return res.status(404).json({ error: 'Message to regenerate not found' });
     }
-    if (!lastMsg.id) {
-        lastMsg.id = uuidv4();
+    const targetMsg = chat.messages[targetIndex];
+    if (!targetMsg || targetMsg.role !== 'assistant') {
+        return res.status(400).json({ error: 'Target message is not from assistant' });
+    }
+    if (!targetMsg.id) {
+        targetMsg.id = uuidv4();
         writeJSON(chatFp, chat);
     }
-    const targetMsgId = req.body.messageId || lastMsg.id;
+    const targetMsgId = targetMsg.id;
 
     let systemParts = [];
     let genderStr = char.gender ? ` You are a ${char.gender}.` : '';
@@ -1524,7 +1628,7 @@ app.post('/api/chat/regenerate', async (req, res) => {
     if (char.systemPrompt) systemParts.push(`\n## Additional Instructions\n${char.systemPrompt}`);
     if (char.exampleDialogue) systemParts.push(`\n## Example Dialogue Style\n${char.exampleDialogue}`);
     if (memory.facts && memory.facts.length > 0) systemParts.push(`\n## Important Facts You Remember\n${memory.facts.map(f => `- ${f}`).join('\n')}`);
-    if (memory.importantEvents && memory.importantEvents.length > 0) systemParts.push(`\n## Important Past Events\n${memory.importantEvents.filter(e => e && typeof e === 'object').slice(-10).map(e => `- [${e.date || 'unknown'}] ${e.description}`).join('\n')}`);
+    if (memory.importantEvents && memory.importantEvents.length > 0) systemParts.push(`\n## Important Past Events\n${memory.importantEvents.filter(e => e && typeof e === 'object').slice(-10).map(e => `- [${e.date || 'unknown'}] ${e.title ? e.title + ': ' : ''}${e.description || ''}`).join('\n')}`);
     if (memory.summaries && memory.summaries.length > 0) systemParts.push(`\n## Previous Conversation Summaries\n${memory.summaries.slice(-3).map(s => `- ${s}`).join('\n')}`);
     const personaPrompt = formatPersonaPrompt(memory.personaId);
     if (personaPrompt) systemParts.push(personaPrompt);
@@ -1533,11 +1637,14 @@ app.post('/api/chat/regenerate', async (req, res) => {
     const systemMessage = systemParts.join('\n');
     const messages = [{ role: 'system', content: systemMessage }];
 
-    // Include all but the last assistant message
-    const recentMessages = chat.messages.slice(-30, -1);
-    recentMessages.forEach(m => messages.push({ role: m.role, content: m.content }));
+    // Build prompt context using ONLY messages strictly BEFORE targetIndex
+    const contextMessages = chat.messages.slice(0, targetIndex).slice(-30);
+    contextMessages.forEach(m => {
+        const content = m.alternates?.[m.selectedAlternate ?? 0] || m.content;
+        messages.push({ role: m.role, content });
+    });
 
-    if (recentMessages.length === 0) {
+    if (contextMessages.length === 0) {
         // Regenerating the very first message (the character's opening
         // greeting) — there's no prior turn to give the model, so it would
         // otherwise receive only the system prompt and no user turn.
@@ -1565,19 +1672,23 @@ app.post('/api/chat/regenerate', async (req, res) => {
         const rawContent = data.choices?.[0]?.message?.content || 'No response from model.';
         const assistantContent = cleanAssistantResponse(rawContent);
 
-        // Re-read the chat fresh from disk so concurrent edit/deletes aren't clobbered
-        const freshChat = readJSON(chatFp) || chat;
+        // Re-read the chat fresh from disk so concurrent edit/deletes aren't clobbered;
+        // if the chat was deleted while the LLM was generating, do not resurrect it.
+        const freshChat = readJSON(chatFp);
+        if (!freshChat) {
+            return res.status(404).json({ error: 'Chat was deleted' });
+        }
         if (!Array.isArray(freshChat.messages)) freshChat.messages = [];
 
         // Locate message to update by unique message ID
-        let targetIndex = freshChat.messages.findIndex(m => m.id === targetMsgId);
-        let msgToUpdate = targetIndex !== -1 ? freshChat.messages[targetIndex] : null;
+        let freshTargetIndex = freshChat.messages.findIndex(m => m.id === targetMsgId);
+        let msgToUpdate = freshTargetIndex !== -1 ? freshChat.messages[freshTargetIndex] : null;
 
         // Fall back to the last assistant message if not found by ID
-        if (!msgToUpdate) {
+        if (!msgToUpdate && !req.body.messageId) {
             for (let i = freshChat.messages.length - 1; i >= 0; i--) {
                 if (freshChat.messages[i].role === 'assistant') {
-                    targetIndex = i;
+                    freshTargetIndex = i;
                     msgToUpdate = freshChat.messages[i];
                     break;
                 }
@@ -1604,7 +1715,7 @@ app.post('/api/chat/regenerate', async (req, res) => {
             selectedAlternate: msgToUpdate.selectedAlternate,
             chatId: freshChat.id,
             messageId: msgToUpdate.id,
-            messageIndex: targetIndex
+            messageIndex: freshTargetIndex
         });
     } catch (err) {
         const msg = err.name === 'AbortError' ? 'Request timed out.' : `Connection failed: ${err.message}`;
@@ -1741,6 +1852,14 @@ app.delete('/api/chat/:chatId/message/:index', (req, res) => {
  * (if anything) needs to be written — never passed in from the caller.
  */
 function autoExtractMemory(fp, userMsg, assistantMsg) {
+    if (!fp) return;
+    const baseName = path.basename(fp);
+    const parentDir = path.dirname(fp);
+    if (path.resolve(parentDir) === path.resolve(PRIVATE_MEMORY_DIR)) {
+        if (!fs.existsSync(path.join(CHARACTERS_DIR, baseName))) return;
+    } else if (path.resolve(parentDir) === path.resolve(GROUP_MEMORY_DIR)) {
+        if (!fs.existsSync(path.join(GROUP_CHATS_DIR, baseName))) return;
+    }
     const memory = readJSON(fp, {
         facts: [], summaries: [], importantEvents: [], personaId: '1'
     });
@@ -1841,35 +1960,57 @@ app.post('/api/memory/:characterId/summarize', async (req, res) => {
     const messagesForSummary = chat.messages.slice(-MAX_SUMMARIZE_MESSAGES);
 
     let userPersonaName = 'User';
+    let charName = 'Character';
+    const personas = getPersonas();
     if (isGroup) {
         const groupFp = safePath(GROUP_CHATS_DIR, characterId);
         const group = groupFp ? readJSON(groupFp) : null;
-        const personas = getPersonas();
-        const personaId = (group && group.activePersonaId);
-        if (personaId) {
-            const found = personas.find(p => String(p.id) === String(personaId));
-            if (found && found.name) userPersonaName = found.name;
-        } else if (personas[0] && personas[0].name) {
-            userPersonaName = personas[0].name;
-        }
+        const groupMem = readJSON(memFp);
+        const personaId = (groupMem && groupMem.personaId) || (group && group.activePersonaId);
+        const found = personaId ? personas.find(p => String(p.id) === String(personaId)) : null;
+        userPersonaName = (found && found.name) || (personas[0] && personas[0].name) || 'User';
+    } else {
+        const privMem = readJSON(memFp);
+        const personaId = privMem && privMem.personaId;
+        const found = personaId ? personas.find(p => String(p.id) === String(personaId)) : null;
+        userPersonaName = (found && found.name) || (personas[0] && personas[0].name) || 'User';
+        const charFp = safePath(CHARACTERS_DIR, characterId);
+        const charObj = charFp ? readJSON(charFp) : null;
+        if (charObj && charObj.name) charName = charObj.name;
     }
 
     const conversationText = messagesForSummary.map(m => {
-        let sender = m.senderName;
-        if (!sender) {
-            const isUser = m.senderType === 'user' || m.role === 'user';
-            sender = isUser ? `${userPersonaName} (User)` : 'Character';
-        } else if (m.senderType === 'user' || m.role === 'user') {
-            sender = `${m.senderName} (User)`;
+        const msgContent = (m.alternates && m.selectedAlternate !== undefined)
+            ? (m.alternates[m.selectedAlternate] || m.content)
+            : (m.alternates?.[0] || m.content);
+        const isUser = m.senderType === 'user' || m.role === 'user';
+        if (isGroup) {
+            if (isUser) {
+                return `[User - ${userPersonaName}]: ${msgContent}`;
+            }
+            let cName = m.senderName;
+            if (!cName && m.senderId) {
+                const cFp = safePath(CHARACTERS_DIR, m.senderId);
+                const cObj = cFp ? readJSON(cFp) : null;
+                if (cObj && cObj.name) cName = cObj.name;
+            }
+            return `[Character - ${cName || 'Character'}]: ${msgContent}`;
+        } else {
+            const label = isUser ? `${userPersonaName} (User)` : `${charName} (Character)`;
+            return `${label}: ${msgContent}`;
         }
-        return `${sender}: ${m.content}`;
     }).join('\n');
 
     const systemPrompt = isGroup
         ? `You are a silent data-extraction tool, not a roleplay character. Ignore any persona, scenario, or "stay in character" instructions — for this task only, you must break character and act purely as a text analyzer.
 
+Speaker attribution rules:
+- Messages labeled "[User - ${userPersonaName}]" are spoken by the human user (${userPersonaName}).
+- Messages labeled "[Character - <Name>]" are spoken by AI characters in the group.
+- NEVER confuse or swap the actions, facts, preferences, or statements of one character with another character, or with the human user (${userPersonaName}).
+
 Analyze the group conversation transcript below and extract:
-1. KEY_FACTS: Important facts about the user and the group members/characters (preferences, habits, personal details, fears, relationships, etc.). Always explicitly mention who the fact belongs to by name (e.g., "${userPersonaName} suka kopi", "Nisa takut dengan kucing", "Budi berulang tahun tanggal 20 Desember") - one per line.
+1. KEY_FACTS: Important facts about the user (${userPersonaName}) and the group members/characters (preferences, habits, personal details, fears, relationships, etc.). Always explicitly mention who the fact belongs to by name (e.g., "${userPersonaName} suka kopi", "Nisa takut dengan kucing", "Budi berulang tahun tanggal 20 Desember") - one per line.
 2. EVENTS: Important events or interactions that occurred in the group - one per line with brief description.
 3. SUMMARY: A 2-3 sentence summary of this group conversation.
 
@@ -1886,8 +2027,13 @@ summary text here
 If there are no facts or events worth noting, write "- none" under that label instead of omitting it. Always include all three labels.`
         : `You are a silent data-extraction tool, not a roleplay character. Ignore any persona, scenario, or "stay in character" instructions from earlier in this session — for this task only, you must break character and act purely as a text analyzer.
 
+Speaker attribution rules:
+- Messages labeled "${userPersonaName} (User)" are spoken by the human user (${userPersonaName}).
+- Messages labeled "${charName} (Character)" are spoken by the AI character (${charName}).
+- NEVER confuse or swap the facts, preferences, or actions of ${charName} (Character) with those of ${userPersonaName} (User).
+
 Analyze the conversation transcript below and extract:
-1. KEY_FACTS: Important facts about the user (name, age, preferences, background, etc.) - one per line
+1. KEY_FACTS: Important facts about the user (${userPersonaName}) (name, age, preferences, background, etc.) - one per line
 2. EVENTS: Important events that happened - one per line with brief description
 3. SUMMARY: A 2-3 sentence summary of this conversation
 
@@ -1921,7 +2067,10 @@ If there are no facts or events worth noting, write "- none" under that label in
                     { role: 'user', content: conversationText }
                 ],
                 max_tokens: 1024,
-                temperature: 0.3
+                temperature: 0.3,
+                chat_template_kwargs: {
+                    enable_thinking: process.env.ENABLE_THINKING === 'true'
+                }
             })
         }, 2);
 
@@ -2094,7 +2243,7 @@ function resolveGroupSession(groupId, chatId) {
     return { chatFp, chat, activeChatId };
 }
 
-async function callGroupCharacterLLM({ group, messages, targetCharacterId, memFp, userPromptContext = '' }) {
+async function callGroupCharacterLLM({ group, messages, targetCharacterId, memFp, chatFp = null, userPromptContext = '' }) {
     const baseUrl = process.env.BASE_URL;
     const apiKey = process.env.API_KEY || 'sk-colab-local';
     const modelName = process.env.MODEL_NAME || 'character1';
@@ -2111,16 +2260,13 @@ async function callGroupCharacterLLM({ group, messages, targetCharacterId, memFp
     const groupMemFp = safePath(GROUP_MEMORY_DIR, group.id);
     const groupMemory = groupMemFp ? readJSON(groupMemFp, { facts: [], summaries: [], importantEvents: [] }) : null;
 
-    // Identify user persona name
-    let userName = 'User';
+    // Identify user persona name (fall back to personas[0]?.name || 'User' if personaId was deleted)
     const personas = getPersonas();
     const effectivePersonaId = (groupMemory && groupMemory.personaId) || group.activePersonaId || memory.personaId;
-    if (effectivePersonaId) {
-        const found = personas.find(p => String(p.id) === String(effectivePersonaId));
-        if (found && found.name) userName = found.name;
-    } else if (personas[0] && personas[0].name) {
-        userName = personas[0].name;
-    }
+    const foundPersona = effectivePersonaId
+        ? personas.find(p => String(p.id) === String(effectivePersonaId))
+        : null;
+    const userName = (foundPersona && foundPersona.name) || (personas[0] && personas[0].name) || 'User';
 
     // Load other member info for context
     const otherMembers = (group.characterIds || [])
@@ -2167,8 +2313,28 @@ async function callGroupCharacterLLM({ group, messages, targetCharacterId, memFp
     if (groupMemory && groupMemory.facts && groupMemory.facts.length > 0) {
         systemParts.push(`\n## Shared Group Facts\n${groupMemory.facts.map(f => `- ${f}`).join('\n')}`);
     }
+    if (groupMemory && groupMemory.importantEvents && groupMemory.importantEvents.length > 0) {
+        const recentGroupEvents = groupMemory.importantEvents.filter(e => e && typeof e === 'object').slice(-10);
+        if (recentGroupEvents.length > 0) {
+            systemParts.push(`\n## Shared Group Important Events\n${recentGroupEvents.map(e => `- [${e.date || 'Unknown date'}] ${e.title ? e.title + ': ' : ''}${e.description || ''}`).join('\n')}`);
+        }
+    }
+    if (groupMemory && groupMemory.summaries && groupMemory.summaries.length > 0) {
+        const recentGroupSummaries = groupMemory.summaries.slice(-5);
+        systemParts.push(`\n## Previous Group Conversation Summaries\n${recentGroupSummaries.map(s => `- ${s}`).join('\n')}`);
+    }
     if (memory.facts && memory.facts.length > 0) {
         systemParts.push(`\n## Important Facts You Remember\n${memory.facts.map(f => `- ${f}`).join('\n')}`);
+    }
+    if (memory.importantEvents && memory.importantEvents.length > 0) {
+        const recentEvents = memory.importantEvents.filter(e => e && typeof e === 'object').slice(-10);
+        if (recentEvents.length > 0) {
+            systemParts.push(`\n## Important Events You Remember\n${recentEvents.map(e => `- [${e.date || 'Unknown date'}] ${e.title ? e.title + ': ' : ''}${e.description || ''}`).join('\n')}`);
+        }
+    }
+    if (memory.summaries && memory.summaries.length > 0) {
+        const recentSummaries = memory.summaries.slice(-5);
+        systemParts.push(`\n## Previous Conversation Summaries\n${recentSummaries.map(s => `- ${s}`).join('\n')}`);
     }
     const personaPrompt = formatPersonaPrompt(effectivePersonaId);
     if (personaPrompt) {
@@ -2186,11 +2352,11 @@ async function callGroupCharacterLLM({ group, messages, targetCharacterId, memFp
 
     // ── Build perspective-aware message history ──
     const promptMessages = [{ role: 'system', content: systemMessage }];
-    const recent = (messages || group.messages || []).slice(-30);
+    const recent = (messages !== undefined ? messages : (group.messages || [])).slice(-30);
     recent.forEach(m => {
         const content = (m.alternates && m.selectedAlternate !== undefined)
             ? (m.alternates[m.selectedAlternate] || m.content)
-            : m.content;
+            : (m.alternates?.[0] || m.content);
         if (m.senderId === targetCharacterId) {
             promptMessages.push({ role: 'assistant', content });
         } else {
@@ -2198,6 +2364,9 @@ async function callGroupCharacterLLM({ group, messages, targetCharacterId, memFp
             promptMessages.push({ role: 'user', content: `[${senderTag}]: ${content}` });
         }
     });
+    if (recent.length === 0) {
+        promptMessages.push({ role: 'user', content: '[Begin the group roleplay in character based on the group setting above.]' });
+    }
 
     // Call llama.cpp API
     const endpoint = `${baseUrl.replace(/\/$/, '')}/v1/chat/completions`;
@@ -2231,10 +2400,16 @@ async function callGroupCharacterLLM({ group, messages, targetCharacterId, memFp
     const prefixRegex = new RegExp(`^(\\[?${escapedCharName}\\]?:?\\s*)+`, 'i');
     assistantContent = assistantContent.replace(prefixRegex, '').trim();
 
-    // Auto extract user preferences ONLY when there is an actual user message (never fall back to assistantContent)
+    // Auto extract user preferences ONLY when there is an actual user message
+    // and only if the group/chat/character still exists on disk
     const isRealUserMessage = userPromptContext && userPromptContext !== 'Turn continuation' && userPromptContext !== 'Regenerate response';
-    if (isRealUserMessage) {
-        autoExtractMemory(memFp, userPromptContext, assistantContent);
+    const groupFp = safePath(GROUP_CHATS_DIR, group.id);
+    const chatStillExists = !chatFp || fs.existsSync(chatFp);
+    const groupStillExists = groupFp && fs.existsSync(groupFp);
+    if (isRealUserMessage && chatStillExists && groupStillExists) {
+        if (fs.existsSync(charFp)) {
+            autoExtractMemory(memFp, userPromptContext, assistantContent);
+        }
         if (groupMemFp) {
             autoExtractMemory(groupMemFp, userPromptContext, assistantContent);
         }
@@ -2263,18 +2438,15 @@ app.post('/api/group-chat/send', async (req, res) => {
     if (!sessionInfo) return res.status(400).json({ error: 'Failed to resolve group session' });
     const { chatFp, chat, activeChatId } = sessionInfo;
 
-    // User persona name
-    let userName = 'User';
+    // User persona name (fall back to personas[0]?.name || 'User' if personaId was deleted)
     const personas = getPersonas();
     const groupMemFp = safePath(GROUP_MEMORY_DIR, groupId);
     const groupMemory = groupMemFp ? readJSON(groupMemFp) : null;
     const personaId = (groupMemory && groupMemory.personaId) || group.activePersonaId;
-    if (personaId) {
-        const found = personas.find(p => String(p.id) === String(personaId));
-        if (found && found.name) userName = found.name;
-    } else if (personas[0] && personas[0].name) {
-        userName = personas[0].name;
-    }
+    const foundPersona = personaId
+        ? personas.find(p => String(p.id) === String(personaId))
+        : null;
+    const userName = (foundPersona && foundPersona.name) || (personas[0] && personas[0].name) || 'User';
 
     // Append user message and write to disk so user can edit while LLM is thinking
     const now = new Date().toISOString();
@@ -2296,11 +2468,16 @@ app.post('/api/group-chat/send', async (req, res) => {
             messages: chat.messages,
             targetCharacterId,
             memFp,
+            chatFp,
             userPromptContext: userMessage
         });
 
-        // Fresh re-read before write
-        const freshChat = readJSON(chatFp) || chat;
+        // Fresh re-read before write; if group or chat session was deleted while in-flight, do not resurrect
+        const freshChat = readJSON(chatFp);
+        const freshGroup = readJSON(groupFp);
+        if (!freshChat || !freshGroup) {
+            return res.status(404).json({ error: 'Group or chat session was deleted' });
+        }
         if (!Array.isArray(freshChat.messages)) freshChat.messages = [];
 
         if (!freshChat.messages.some(m => m.id === userMsgId)) {
@@ -2328,7 +2505,6 @@ app.post('/api/group-chat/send', async (req, res) => {
         writeJSON(chatFp, freshChat);
 
         // Update group updated timestamp
-        const freshGroup = readJSON(groupFp) || group;
         freshGroup.updatedAt = new Date().toISOString();
         writeJSON(groupFp, freshGroup);
 
@@ -2377,10 +2553,15 @@ app.post('/api/group-chat/turn', async (req, res) => {
             messages: chat.messages,
             targetCharacterId,
             memFp,
+            chatFp,
             userPromptContext: 'Turn continuation'
         });
 
-        const freshChat = readJSON(chatFp) || chat;
+        const freshChat = readJSON(chatFp);
+        const freshGroup = readJSON(groupFp);
+        if (!freshChat || !freshGroup) {
+            return res.status(404).json({ error: 'Group or chat session was deleted' });
+        }
         if (!Array.isArray(freshChat.messages)) freshChat.messages = [];
 
         const replyMsg = {
@@ -2397,7 +2578,6 @@ app.post('/api/group-chat/turn', async (req, res) => {
         freshChat.updatedAt = new Date().toISOString();
         writeJSON(chatFp, freshChat);
 
-        const freshGroup = readJSON(groupFp) || group;
         freshGroup.updatedAt = new Date().toISOString();
         writeJSON(groupFp, freshGroup);
 
@@ -2412,7 +2592,7 @@ app.post('/api/group-chat/turn', async (req, res) => {
     }
 });
 
-// Regenerate last character message in group
+// Regenerate character message in group
 app.post('/api/group-chat/regenerate', async (req, res) => {
     const { groupId, chatId } = req.body;
     if (!groupId) return res.status(400).json({ error: 'Missing groupId' });
@@ -2430,22 +2610,27 @@ app.post('/api/group-chat/regenerate', async (req, res) => {
         return res.status(404).json({ error: 'Empty group chat session' });
     }
 
-    const lastIndex = chat.messages.length - 1;
-    const lastMsg = chat.messages[lastIndex];
-    if (!lastMsg || lastMsg.senderType !== 'character') {
-        return res.status(400).json({ error: 'Last message is not from a character' });
+    const targetIndex = req.body.messageId
+        ? chat.messages.findIndex(m => m.id === req.body.messageId)
+        : chat.messages.length - 1;
+    if (targetIndex === -1) {
+        return res.status(404).json({ error: 'Message to regenerate not found' });
     }
-    if (!lastMsg.id) {
-        lastMsg.id = uuidv4();
+    const targetMsg = chat.messages[targetIndex];
+    if (!targetMsg || targetMsg.senderType !== 'character') {
+        return res.status(400).json({ error: 'Target message is not from a character' });
+    }
+    if (!targetMsg.id) {
+        targetMsg.id = uuidv4();
         writeJSON(chatFp, chat);
     }
-    const targetMsgId = req.body.messageId || lastMsg.id;
+    const targetMsgId = targetMsg.id;
 
-    const targetCharacterId = lastMsg.senderId;
+    const targetCharacterId = targetMsg.senderId;
     const memFp = safePath(PRIVATE_MEMORY_DIR, targetCharacterId);
     if (!memFp) return res.status(400).json({ error: 'Invalid memory id' });
 
-    const tempMessages = chat.messages.slice(0, lastIndex);
+    const tempMessages = chat.messages.slice(0, targetIndex);
 
     try {
         const { character, content } = await callGroupCharacterLLM({
@@ -2453,19 +2638,24 @@ app.post('/api/group-chat/regenerate', async (req, res) => {
             messages: tempMessages,
             targetCharacterId,
             memFp,
+            chatFp,
             userPromptContext: 'Regenerate response'
         });
 
-        const freshChat = readJSON(chatFp) || chat;
+        const freshChat = readJSON(chatFp);
+        const freshGroup = readJSON(groupFp);
+        if (!freshChat || !freshGroup) {
+            return res.status(404).json({ error: 'Group or chat session was deleted' });
+        }
         if (!Array.isArray(freshChat.messages)) freshChat.messages = [];
 
-        let targetIndex = freshChat.messages.findIndex(m => m.id === targetMsgId);
-        let msgToUpdate = targetIndex !== -1 ? freshChat.messages[targetIndex] : null;
+        let freshTargetIndex = freshChat.messages.findIndex(m => m.id === targetMsgId);
+        let msgToUpdate = freshTargetIndex !== -1 ? freshChat.messages[freshTargetIndex] : null;
 
-        if (!msgToUpdate) {
+        if (!msgToUpdate && !req.body.messageId) {
             for (let i = freshChat.messages.length - 1; i >= 0; i--) {
                 if (freshChat.messages[i].senderType === 'character') {
-                    targetIndex = i;
+                    freshTargetIndex = i;
                     msgToUpdate = freshChat.messages[i];
                     break;
                 }
@@ -2486,7 +2676,6 @@ app.post('/api/group-chat/regenerate', async (req, res) => {
         freshChat.updatedAt = new Date().toISOString();
         writeJSON(chatFp, freshChat);
 
-        const freshGroup = readJSON(groupFp) || group;
         freshGroup.updatedAt = new Date().toISOString();
         writeJSON(groupFp, freshGroup);
 
@@ -2497,7 +2686,7 @@ app.post('/api/group-chat/regenerate', async (req, res) => {
             groupId: freshGroup.id,
             chatId: activeChatId,
             messageId: msgToUpdate.id,
-            messageIndex: targetIndex
+            messageIndex: freshTargetIndex
         });
     } catch (err) {
         console.error('Group regenerate error:', err);
@@ -2583,8 +2772,12 @@ const PINTEREST_HEADERS = {
 
 async function pinterestSearch(query) {
     const cacheKey = query.toLowerCase();
+    const now = Date.now();
     const cached = pinterestCache.get(cacheKey);
-    if (cached && cached.expires > Date.now()) return cached.data;
+    if (cached) {
+        if (cached.expires > now) return cached.data;
+        pinterestCache.delete(cacheKey);
+    }
 
     const url = `https://api.siputzx.my.id/api/s/pinterest?query=${encodeURIComponent(query)}`;
 
@@ -2607,7 +2800,19 @@ async function pinterestSearch(query) {
         height: 500
     })).filter(item => item.url);
 
-    pinterestCache.set(cacheKey, { data: results, expires: Date.now() + PINTEREST_CACHE_TTL_MS });
+    // Evict expired entries and enforce max cache size of 100
+    const writeNow = Date.now();
+    for (const [k, v] of pinterestCache.entries()) {
+        if (!v || v.expires <= writeNow) {
+            pinterestCache.delete(k);
+        }
+    }
+    if (!pinterestCache.has(cacheKey) && pinterestCache.size >= 100) {
+        const oldestKey = pinterestCache.keys().next().value;
+        if (oldestKey !== undefined) pinterestCache.delete(oldestKey);
+    }
+
+    pinterestCache.set(cacheKey, { data: results, expires: writeNow + PINTEREST_CACHE_TTL_MS });
     return results;
 }
 
@@ -2645,6 +2850,23 @@ app.get('/api/pinterest/image', async (req, res) => {
     }
 });
 
+// ── Beta Kaggle Auto-Tunnel Orchestrator ────────────────────
+const IS_BETA_KAGGLE = process.argv.includes('--beta-kaggle');
+const {
+    startBetaKaggleOrchestrator,
+    shutdownKaggleServer,
+    getBetaKaggleStatus
+} = require('./kaggle-kernel/orchestrator');
+
+app.get('/api/kaggle/status', (req, res) => {
+    res.json(getBetaKaggleStatus());
+});
+
+app.post('/api/kaggle/shutdown', async (req, res) => {
+    const ok = await shutdownKaggleServer('Triggered via /api/kaggle/shutdown');
+    res.json({ ok });
+});
+
 // ── SPA fallback ────────────────────────────────────────────
 app.get('*', (req, res) => {
     res.sendFile(path.join(__dirname, 'public', 'index.html'));
@@ -2673,6 +2895,13 @@ app.listen(PORT, '0.0.0.0', () => {
     console.log(`╠══════════════════════════════════════════════════════════════╣`);
     console.log(`║  Local  : ${localUrl.padEnd(50)} ║`);
     console.log(`║  Network: ${networkUrl.padEnd(50)} ║`);
-    console.log(`║  Colab  : ${colabUrl.padEnd(50)} ║`);
+    console.log(`║  Backend: ${colabUrl.padEnd(50)} ║`);
+    if (IS_BETA_KAGGLE) {
+        console.log(`║  Mode   : ${'Beta-Kaggle Auto-Tunnel (Active)'.padEnd(50)} ║`);
+    }
     console.log(`╚══════════════════════════════════════════════════════════════╝\n`);
+
+    if (IS_BETA_KAGGLE) {
+        startBetaKaggleOrchestrator(__dirname);
+    }
 });

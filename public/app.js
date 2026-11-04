@@ -26,6 +26,7 @@ let state = {
     groups: [],
     currentGroupId: null,
     currentGroupChatId: null,
+    currentGroupMessages: [],
     groupChats: [],
     _groupChatNavToken: 0,
     _deletingGroupChats: new Set(),
@@ -61,6 +62,9 @@ function updateChatSendingUI() {
     if (takeTurnBtn) {
         takeTurnBtn.disabled = isBusy;
     }
+    if (typeof updateJumpToLatestBtn === 'function') {
+        updateJumpToLatestBtn();
+    }
 }
 
 // Backward-compatibility getter/setter for state.sending
@@ -80,9 +84,19 @@ Object.defineProperty(state, 'sending', {
 window.langData = {};
 window.t = (key) => window.langData[key] || key;
 
-// ── DOM Refs ─────────────────────────────────────────────
+// ── DOM Refs & Crisp Icons ───────────────────────────────
 const $ = (sel) => document.querySelector(sel);
 const $$ = (sel) => document.querySelectorAll(sel);
+
+const UI_ICONS = {
+    copy: `<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>`,
+    check: `<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>`,
+    edit: `<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4Z"/></svg>`,
+    trash: `<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18"/><path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6"/><path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2"/></svg>`,
+    regen: `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a9 9 0 0 0-9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/><path d="M3 3v5h5"/><path d="M3 12a9 9 0 0 0 9 9 9.75 9.75 0 0 0 6.74-2.74L21 16"/><path d="M16 16h5v5"/></svg>`,
+    chat: `<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>`,
+    group: `<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>`
+};
 
 // ── Avatar Helper ────────────────────────────────────────
 function getAvatarInnerHtml(avatar, name) {
@@ -94,12 +108,12 @@ function getAvatarInnerHtml(avatar, name) {
 
 function getActivePersona() {
     if (!state.personas || state.personas.length === 0) return null;
-    let personaId = state.memory?.personaId;
+    let personaId = null;
     if (state.currentGroupId) {
         const group = state.groups.find(g => g.id === state.currentGroupId);
-        if (group?.activePersonaId) {
-            personaId = group.activePersonaId;
-        }
+        personaId = group?.activePersonaId || state.memory?.personaId || null;
+    } else {
+        personaId = state.memory?.personaId || null;
     }
     if (personaId) {
         const found = state.personas.find(p => String(p.id) === String(personaId));
@@ -113,7 +127,8 @@ function getUserAvatarInnerHtml() {
     if (persona && persona.avatar) {
         return getAvatarInnerHtml(persona.avatar, persona.name || 'User');
     }
-    return '👤';
+    const initial = (persona && persona.name) ? persona.name.trim().charAt(0).toUpperCase() : 'U';
+    return escapeHtml(initial || 'U');
 }
 
 function updateAvatarPreview(avatarData) {
@@ -255,12 +270,20 @@ async function testConnection() {
     const result = await api('GET', '/api/test-connection');
     const statusDot = $('.status-dot');
     const statusText = $('.status-text');
+    if (!statusDot || !statusText) return;
 
-    if (result.ok) {
-        statusDot.className = 'status-dot online';
-        statusText.textContent = t('sidebar.connected') || 'Connected to Backend';
-    } else {
+    const baseUrl = (state.config && state.config.baseUrl) ? state.config.baseUrl.trim() : '';
+    const modelLabel = (state.config && state.config.modelName) ? state.config.modelName : '';
+
+    if (!baseUrl) {
         statusDot.className = 'status-dot offline';
+        statusText.textContent = 'Not configured — set URL';
+    } else if (result.ok) {
+        statusDot.className = 'status-dot online';
+        const baseConnected = t('sidebar.connected') || 'Connected';
+        statusText.textContent = modelLabel ? `${baseConnected} · ${modelLabel}` : baseConnected;
+    } else {
+        statusDot.className = 'status-dot error';
         statusText.textContent = result.error || t('sidebar.disconnected') || 'Disconnected';
     }
 }
@@ -270,7 +293,13 @@ async function testConnection() {
 // ══════════════════════════════════════════════════════════
 
 async function loadCharacters() {
-    state.characters = await api('GET', '/api/characters');
+    const res = await api('GET', '/api/characters');
+    if (Array.isArray(res)) {
+        state.characters = res;
+    } else {
+        if (res && res.error) toast(res.error, 'error');
+        state.characters = state.characters || [];
+    }
     renderCharacterList();
 }
 
@@ -306,7 +335,7 @@ function renderCharacterList() {
                 <div class="character-item-name">${escapeHtml(c.name)}</div>
                 <div class="character-item-desc">${escapeHtml((c.personality || '').substring(0, 50))}</div>
             </div>
-            ${(state.unreadCharacters && state.unreadCharacters.has(c.id)) ? '<span class="chat-item-unread-dot" title="New reply" style="position: absolute; right: 12px; top: 14px;"></span>' : ''}
+            ${(state.unreadCharacters && state.unreadCharacters.has(c.id)) ? '<span class="chat-item-unread-dot" title="New reply" style="position: absolute; inset-inline-end: 12px; top: 14px;"></span>' : ''}
         </div>
     `).join('');
 }
@@ -347,9 +376,6 @@ async function selectCharacter(id) {
     state.currentMessages = [];
     renderCharacterList();
     renderGroupList();
-
-    // Reset status to Online for single character
-    $('#chat-header-status').textContent = t('chat.status.online') || 'Online';
 
     // Load chats and memory for this character in parallel
     const [chats, memory] = await Promise.all([
@@ -399,6 +425,8 @@ function openCharacterEditor(editId = null) {
     $('#char-gender').value = char ? (char.gender || '') : '';
     $('#char-age').value = char ? (char.age || '') : '';
     $('#char-avatar').value = char ? (char.avatar || '') : '';
+    const avatarFileInput = $('#char-avatar-file');
+    if (avatarFileInput) avatarFileInput.value = '';
     // Update avatar preview after modal opens
     setTimeout(() => updateAvatarPreview($('#char-avatar').value), 50);
     $('#char-personality').value = char ? (char.personality || '') : '';
@@ -435,10 +463,18 @@ async function saveCharacter() {
     };
 
     if (editId) {
-        await api('PUT', `/api/characters/${editId}`, data);
+        const res = await api('PUT', `/api/characters/${editId}`, data);
+        if (!res || res.error) {
+            toast((res && res.error) || 'Failed to update character', 'error');
+            return;
+        }
         toast(t('toast.char_updated'), 'success');
     } else {
         const newChar = await api('POST', '/api/characters', data);
+        if (!newChar || newChar.error) {
+            toast((newChar && newChar.error) || 'Failed to create character', 'error');
+            return;
+        }
         toast(t('toast.char_created'), 'success');
         state.currentCharacterId = newChar.id;
     }
@@ -457,7 +493,11 @@ async function deleteCharacter() {
     if (!editId) return;
     if (!confirm(t('app.confirm_delete_char'))) return;
 
-    await api('DELETE', `/api/characters/${editId}`);
+    const res = await api('DELETE', `/api/characters/${editId}`);
+    if (!res || res.error) {
+        toast((res && res.error) || 'Failed to delete character', 'error');
+        return;
+    }
     toast(t('toast.char_deleted'), 'success');
     closeModal('modal-character');
 
@@ -479,8 +519,14 @@ function switchSidebarTab(tab) {
     const groupPanel = $('#sidebar-panel-groups');
 
     if (tab === 'characters') {
-        if (charTabBtn) charTabBtn.classList.add('active');
-        if (groupTabBtn) groupTabBtn.classList.remove('active');
+        if (charTabBtn) {
+            charTabBtn.classList.add('active');
+            charTabBtn.setAttribute('aria-selected', 'true');
+        }
+        if (groupTabBtn) {
+            groupTabBtn.classList.remove('active');
+            groupTabBtn.setAttribute('aria-selected', 'false');
+        }
         if (charPanel) charPanel.style.display = 'flex';
         if (groupPanel) groupPanel.style.display = 'none';
         const groupChatTitle = $('#group-chat-list-title');
@@ -489,8 +535,14 @@ function switchSidebarTab(tab) {
         if (groupChatList) groupChatList.style.display = 'none';
         renderChatList();
     } else {
-        if (groupTabBtn) groupTabBtn.classList.add('active');
-        if (charTabBtn) charTabBtn.classList.remove('active');
+        if (groupTabBtn) {
+            groupTabBtn.classList.add('active');
+            groupTabBtn.setAttribute('aria-selected', 'true');
+        }
+        if (charTabBtn) {
+            charTabBtn.classList.remove('active');
+            charTabBtn.setAttribute('aria-selected', 'false');
+        }
         if (groupPanel) groupPanel.style.display = 'flex';
         if (charPanel) charPanel.style.display = 'none';
         const charChatTitle = $('#chat-list-title');
@@ -508,10 +560,16 @@ window.switchSidebarTab = switchSidebarTab;
 async function loadGroups() {
     try {
         const groups = await api('GET', '/api/groups');
-        state.groups = Array.isArray(groups) ? groups : [];
+        if (Array.isArray(groups)) {
+            state.groups = groups;
+        } else {
+            if (groups && groups.error) toast(groups.error, 'error');
+            state.groups = state.groups || [];
+        }
         renderGroupList();
     } catch (err) {
         console.error('Failed to load groups:', err);
+        state.groups = state.groups || [];
     }
 }
 
@@ -541,10 +599,11 @@ function renderGroupList() {
     }
 
     list.innerHTML = filtered.map(g => {
-        const memberCount = (g.characterIds || []).length;
+        const activeMemberIds = (g.characterIds || []).filter(cid => state.characters.some(c => c.id === cid));
+        const memberCount = state.characters.length > 0 ? activeMemberIds.length : (g.characterIds || []).length;
         const avatarHtml = g.avatar
             ? `<img src="${escapeHtml(g.avatar)}" alt="${escapeHtml(g.name)}">`
-            : '👥';
+            : escapeHtml(g.name ? g.name.trim().charAt(0).toUpperCase() : 'G');
         const hasUnread = state.unreadGroups && state.unreadGroups.has(g.id);
         return `
             <div class="group-item ${g.id === state.currentGroupId ? 'active' : ''}" style="position: relative;"
@@ -554,7 +613,7 @@ function renderGroupList() {
                     <div class="group-item-name">${escapeHtml(g.name)}</div>
                     <div class="group-item-meta">${memberCount} karakter</div>
                 </div>
-                ${hasUnread ? '<span class="chat-item-unread-dot" title="New reply" style="position: absolute; right: 12px; top: 14px;"></span>' : ''}
+                ${hasUnread ? '<span class="chat-item-unread-dot" title="New reply" style="position: absolute; inset-inline-end: 12px; top: 14px;"></span>' : ''}
             </div>
         `;
     }).join('');
@@ -578,8 +637,10 @@ window.clearGroupSearch = clearGroupSearch;
 async function selectGroup(groupId, preserveChatId = null) {
     state.currentGroupId = groupId;
     state.currentGroupChatId = preserveChatId;
+    state.currentGroupMessages = [];
     state.currentCharacterId = null;
     state.currentChatId = null;
+    state.memory = { facts: [], summaries: [], importantEvents: [], personaId: null };
     if (state.unreadGroups) state.unreadGroups.delete(groupId);
     renderCharacterList();
     renderGroupList();
@@ -595,10 +656,22 @@ async function selectGroup(groupId, preserveChatId = null) {
     $('#view-chat').classList.add('active');
 
     try {
-        const group = await api('GET', `/api/groups/${groupId}`);
+        const [group, groupMem] = await Promise.all([
+            api('GET', `/api/groups/${groupId}`),
+            api('GET', `/api/groups/${groupId}/memory`)
+        ]);
+        if (state.currentGroupId !== groupId) return;
+
         if (!group || group.error) {
-            toast(t('app.error_load_group') || 'Grup tidak ditemukan', 'error');
+            toast((group && group.error) || t('app.error_load_group') || 'Grup tidak ditemukan', 'error');
             return;
+        }
+
+        state.memory = (groupMem && !groupMem.error)
+            ? groupMem
+            : { facts: [], summaries: [], importantEvents: [], personaId: group.activePersonaId || null };
+        if (group.activePersonaId) {
+            state.memory.personaId = group.activePersonaId;
         }
 
         // Update local group cache
@@ -609,21 +682,23 @@ async function selectGroup(groupId, preserveChatId = null) {
             state.groups.push(group);
         }
 
-        // Default active speaker
-        if (!state.activeSpeakerId || !group.characterIds.includes(state.activeSpeakerId)) {
-            state.activeSpeakerId = (group.characterIds && group.characterIds.length > 0) ? group.characterIds[0] : null;
+        // Default active speaker from existing characters only
+        const activeMemberIds = (group.characterIds || []).filter(cid => state.characters.some(c => c.id === cid));
+        if (!state.activeSpeakerId || !activeMemberIds.includes(state.activeSpeakerId)) {
+            state.activeSpeakerId = activeMemberIds[0] || null;
         }
 
         // Update Header
         const avatarHtml = group.avatar
             ? `<img src="${escapeHtml(group.avatar)}" alt="${escapeHtml(group.name)}" style="width:100%;height:100%;object-fit:cover;border-radius:var(--radius-sm)">`
-            : '👥';
+            : escapeHtml(group.name ? group.name.trim().charAt(0).toUpperCase() : 'G');
         $('#chat-header-avatar').innerHTML = avatarHtml;
         $('#chat-header-name').textContent = group.name;
 
-        // Requirement 1: Summarize header status to "<count> Anggota"
-        const memberCount = (group.characterIds || []).length;
-        $('#chat-header-status').textContent = `${memberCount} ${t('group.members_suffix') || 'Anggota'}`;
+        // Requirement 1: Summarize header status to "<count> Anggota" (existing active members)
+        const memberCount = activeMemberIds.length;
+        const statusEl = $('#chat-header-status');
+        if (statusEl) statusEl.textContent = `${memberCount} ${t('group.members_suffix') || 'Anggota'}`;
 
         // Render speaker bar
         renderGroupSpeakerBar(group);
@@ -685,11 +760,11 @@ function renderGroupChatList() {
     list.innerHTML = state.groupChats.map(c => `
         <div class="chat-item ${c.id === state.currentGroupChatId ? 'active' : ''}"
              data-id="${c.id}" onclick="loadGroupChat('${c.id}')">
-            <span class="chat-item-icon">💬</span>
+            <span class="chat-item-icon">${UI_ICONS.chat}</span>
             <span class="chat-item-title">${escapeHtml(c.title || 'New Session')}</span>
             ${state.unreadChats.has(c.id) ? '<span class="chat-item-unread-dot" title="New reply"></span>' : ''}
             <div class="chat-item-actions">
-                <button class="chat-item-edit" onclick="event.stopPropagation(); startRenameGroupChat('${c.id}')" title="Rename">✏️</button>
+                <button class="chat-item-edit" onclick="event.stopPropagation(); startRenameGroupChat('${c.id}')" title="Rename">${UI_ICONS.edit}</button>
                 <button class="chat-item-delete" onclick="event.stopPropagation(); deleteGroupChat('${c.id}')" title="Delete">✕</button>
             </div>
         </div>
@@ -714,10 +789,16 @@ async function loadGroupChat(chatId) {
 
 async function startNewGroupChat() {
     if (!state.currentGroupId) return;
+    const requestGroupId = state.currentGroupId;
     try {
-        const newChat = await api('POST', `/api/groups/${state.currentGroupId}/chats`, {
+        const newChat = await api('POST', `/api/groups/${requestGroupId}/chats`, {
             title: t('group.new_session') || 'New Session'
         });
+        if (!newChat || newChat.error) {
+            toast((newChat && newChat.error) || 'Request failed', 'error');
+            return;
+        }
+        if (state.currentGroupId !== requestGroupId) return;
         state.groupChats.unshift(newChat);
         state.currentGroupChatId = newChat.id;
         renderGroupChatList();
@@ -740,7 +821,7 @@ window.startRenameGroupChat = function (chatId) {
 
     chatItem.removeAttribute('onclick');
     chatItem.innerHTML = `
-        <span class="chat-item-icon">💬</span>
+        <span class="chat-item-icon">${UI_ICONS.chat}</span>
         <div class="chat-item-rename-container">
             <input type="text" class="chat-item-rename-input" value="${escapeHtml(currentTitle)}"
                    data-chat-id="${chatId}" autocomplete="off">
@@ -775,7 +856,12 @@ window.saveRenameGroupChat = async function (chatId) {
     const requestGroupId = state.currentGroupId;
 
     try {
-        await api('PUT', `/api/groups/${requestGroupId}/chat/${chatId}`, { title: newTitle });
+        const res = await api('PUT', `/api/groups/${requestGroupId}/chat/${chatId}`, { title: newTitle });
+        if (!res || res.error) {
+            toast((res && res.error) || 'Request failed', 'error');
+            if (state.currentGroupId === requestGroupId) renderGroupChatList();
+            return;
+        }
         if (state.currentGroupId !== requestGroupId) return;
 
         const chat = state.groupChats.find(c => c.id === chatId);
@@ -804,7 +890,11 @@ async function deleteGroupChat(chatId) {
     const requestGroupId = state.currentGroupId;
 
     try {
-        await api('DELETE', `/api/groups/${requestGroupId}/chat/${chatId}`);
+        const res = await api('DELETE', `/api/groups/${requestGroupId}/chat/${chatId}`);
+        if (!res || res.error) {
+            toast((res && res.error) || 'Request failed', 'error');
+            return;
+        }
 
         if (state.currentGroupChatId === chatId) {
             state.currentGroupChatId = null;
@@ -847,8 +937,10 @@ function renderGroupSpeakerBar(group) {
         return state.characters.find(c => c.id === cid);
     }).filter(Boolean);
 
-    if (!state.activeSpeakerId && members.length > 0) {
+    if ((!state.activeSpeakerId || !members.some(m => m.id === state.activeSpeakerId)) && members.length > 0) {
         state.activeSpeakerId = members[0].id;
+    } else if (members.length === 0) {
+        state.activeSpeakerId = null;
     }
 
     chipsDiv.innerHTML = members.map(m => {
@@ -865,6 +957,9 @@ function renderGroupSpeakerBar(group) {
             </button>
         `;
     }).join('');
+    if (typeof updateJumpToLatestBtn === 'function') {
+        updateJumpToLatestBtn();
+    }
 }
 
 function setActiveGroupSpeaker(charId) {
@@ -874,16 +969,20 @@ function setActiveGroupSpeaker(charId) {
 }
 window.setActiveGroupSpeaker = setActiveGroupSpeaker;
 
-function renderGroupMessages(messages) {
+function renderGroupMessages(messages, shouldScroll = true) {
+    state.currentGroupMessages = Array.isArray(messages) ? messages : [];
     const container = $('#chat-messages');
     if (!container) return;
+
+    const prevScrollTop = container.scrollTop;
 
     if (!messages || messages.length === 0) {
         container.innerHTML = `
             <div class="empty-chat">
-                <div class="empty-chat-icon">👥</div>
+                <div class="empty-chat-icon">${UI_ICONS.group}</div>
                 <p>Mulai percakapan di sesi grup ini!</p>
             </div>`;
+        updateJumpToLatestBtn();
         return;
     }
 
@@ -895,7 +994,7 @@ function renderGroupMessages(messages) {
         const isLast = index === messages.length - 1;
         const isLastCharacter = !isUser && isLast;
 
-        let avatarHtml = '👤';
+        let avatarHtml = 'U';
         let senderName = m.senderName || (isUser ? 'User' : 'Character');
 
         if (isUser) {
@@ -907,6 +1006,8 @@ function renderGroupMessages(messages) {
                 avatarHtml = getAvatarInnerHtml(char.avatar, char.name);
             } else if (m.senderAvatar) {
                 avatarHtml = getAvatarInnerHtml(m.senderAvatar, senderName);
+            } else {
+                avatarHtml = getAvatarInnerHtml('', senderName);
             }
         }
 
@@ -929,7 +1030,7 @@ function renderGroupMessages(messages) {
         }
 
         const regenerateBtn = isLastCharacter
-            ? `<button class="regenerate-btn" onclick="regenerateGroupLastMessage()" title="${t('chat.action.regenerate') || 'Regenerate'}">🔄</button>`
+            ? `<button class="regenerate-btn" onclick="regenerateGroupLastMessage()" title="${t('chat.action.regenerate') || 'Regenerate'}">${UI_ICONS.regen}</button>`
             : '';
         const touchEvents = isLastCharacter ? 'ontouchstart="handleTouchStart(event)" ontouchend="handleTouchEnd(event, this)"' : '';
         const msgId = m.id || '';
@@ -937,26 +1038,32 @@ function renderGroupMessages(messages) {
         return `
             <div class="message ${isUser ? 'user' : 'assistant'}" data-index="${index}" data-id="${msgId}">
                 <div class="message-avatar">${avatarHtml}</div>
-                <div style="flex:1; min-width:0;">
+                <div>
                     <div class="group-message-sender">
                         <span>${escapeHtml(senderName)}</span>
                     </div>
                     <div class="message-bubble-container" ${touchEvents}>
-                        <div class="message-bubble" style="width:100%">${contentHtml}</div>
+                        <div class="message-bubble">${contentHtml}</div>
                         ${regenerateBtn}
                     </div>
                     ${alternatesHtml}
                     <div class="message-meta">
                         ${time ? `<span class="message-time">${time}</span>` : ''}
-                        <button class="message-action-btn" onclick="editGroupMessage(${index}, '${msgId}')" title="${t('chat.action.edit') || t('btn.edit') || 'Edit'}">✏️</button>
-                        <button class="message-action-btn message-delete-btn" onclick="deleteGroupMessage(${index}, '${msgId}')" title="${t('chat.action.delete') || 'Hapus'}">🗑️</button>
+                        <button class="message-action-btn" onclick="copyMessageText(this)" title="${t('chat.action.copy') || 'Copy'}">${UI_ICONS.copy}</button>
+                        <button class="message-action-btn" onclick="editGroupMessage(${index}, '${msgId}')" title="${t('chat.action.edit') || t('btn.edit') || 'Edit'}">${UI_ICONS.edit}</button>
+                        <button class="message-action-btn message-delete-btn" onclick="deleteGroupMessage(${index}, '${msgId}')" title="${t('chat.action.delete') || 'Hapus'}">${UI_ICONS.trash}</button>
                     </div>
                 </div>
             </div>
         `;
     }).join('');
 
-    scrollToBottom();
+    if (shouldScroll) {
+        scrollToBottom();
+    } else {
+        container.scrollTop = prevScrollTop;
+        updateJumpToLatestBtn();
+    }
 }
 
 function appendGroupMessage(senderType, content, senderName, avatarData, isLastCharacter = false, senderId = null, messageId = null) {
@@ -980,7 +1087,7 @@ function appendGroupMessage(senderType, content, senderName, avatarData, isLastC
 
     const index = document.querySelectorAll('#chat-messages .message').length;
     const regenerateBtn = isLastCharacter
-        ? `<button class="regenerate-btn" onclick="regenerateGroupLastMessage()" title="${t('chat.action.regenerate') || 'Regenerate'}">🔄</button>`
+        ? `<button class="regenerate-btn" onclick="regenerateGroupLastMessage()" title="${t('chat.action.regenerate') || 'Regenerate'}">${UI_ICONS.regen}</button>`
         : '';
     const touchEvents = isLastCharacter ? 'ontouchstart="handleTouchStart(event)" ontouchend="handleTouchEnd(event, this)"' : '';
     const msgId = messageId || '';
@@ -991,18 +1098,19 @@ function appendGroupMessage(senderType, content, senderName, avatarData, isLastC
     div.dataset.id = msgId;
     div.innerHTML = `
         <div class="message-avatar">${avatarHtml}</div>
-        <div style="flex:1; min-width:0;">
+        <div>
             <div class="group-message-sender">
                 <span>${escapeHtml(senderName || 'Member')}</span>
             </div>
             <div class="message-bubble-container" ${touchEvents}>
-                <div class="message-bubble" style="width:100%">${formatMessageContent(content)}</div>
+                <div class="message-bubble">${formatMessageContent(content)}</div>
                 ${regenerateBtn}
             </div>
             <div class="message-meta">
                 <span class="message-time">${time}</span>
-                <button class="message-action-btn" onclick="editGroupMessage(${index}, '${msgId}')" title="${t('chat.action.edit') || t('btn.edit') || 'Edit'}">✏️</button>
-                <button class="message-action-btn message-delete-btn" onclick="deleteGroupMessage(${index}, '${msgId}')" title="${t('chat.action.delete') || 'Hapus'}">🗑️</button>
+                <button class="message-action-btn" onclick="copyMessageText(this)" title="${t('chat.action.copy') || 'Copy'}">${UI_ICONS.copy}</button>
+                <button class="message-action-btn" onclick="editGroupMessage(${index}, '${msgId}')" title="${t('chat.action.edit') || t('btn.edit') || 'Edit'}">${UI_ICONS.edit}</button>
+                <button class="message-action-btn message-delete-btn" onclick="deleteGroupMessage(${index}, '${msgId}')" title="${t('chat.action.delete') || 'Hapus'}">${UI_ICONS.trash}</button>
             </div>
         </div>
     `;
@@ -1074,12 +1182,24 @@ async function sendGroupMessage(text) {
 
         if (result.error) {
             if (state.currentGroupId === requestGroupId && state.currentGroupChatId === requestChatId) {
-                if (userBubble) userBubble.remove();
+                if (userBubble && userBubble.isConnected) {
+                    userBubble.remove();
+                } else {
+                    const freshErr = await api('GET', `/api/groups/${requestGroupId}/chat/${requestChatId}`);
+                    if (freshErr && Array.isArray(freshErr.messages)) {
+                        renderGroupMessages(freshErr.messages, false);
+                    }
+                }
                 input.value = text;
                 autoResizeInput();
             }
             toast(result.error, 'error');
             return;
+        }
+
+        if (result.chatTitle && Array.isArray(state.groupChats)) {
+            const sChat = state.groupChats.find(c => c.id === requestChatId);
+            if (sChat) sChat.title = result.chatTitle;
         }
 
         if (state.currentGroupId !== requestGroupId || state.currentGroupChatId !== requestChatId) {
@@ -1187,7 +1307,7 @@ async function triggerGroupTurn(targetCharacterId, replyToMessageId = null) {
                 renderGroupChatList();
             }
         } else if (result.replyMessage) {
-            appendGroupMessage('character', result.replyMessage.content, result.replyMessage.senderName, result.replyMessage.senderAvatar, true, result.replyMessage.senderId);
+            appendGroupMessage('character', result.replyMessage.content, result.replyMessage.senderName, result.replyMessage.senderAvatar, true, result.replyMessage.senderId, result.replyMessage.id);
         }
     } catch (err) {
         toast(`Error: ${err.message}`, 'error');
@@ -1246,7 +1366,7 @@ async function regenerateGroupLastMessage() {
     } finally {
         state.sendingChats.delete(requestChatId);
         if (state.currentGroupId === requestGroupId && state.currentGroupChatId === requestChatId) {
-            if (btn) btn.innerHTML = '🔄';
+            if (btn) btn.innerHTML = UI_ICONS.regen;
             updateChatSendingUI();
         }
     }
@@ -1255,36 +1375,58 @@ window.regenerateGroupLastMessage = regenerateGroupLastMessage;
 
 async function changeGroupAlternate(index, delta, messageId) {
     if (!state.currentGroupId || !state.currentGroupChatId) return;
-    const group = await api('GET', `/api/groups/${state.currentGroupId}/chat/${state.currentGroupChatId}`);
-    if (!group || !Array.isArray(group.messages)) return;
 
-    let msg = null;
-    let actualIndex = index;
-    if (messageId) {
-        const fIdx = group.messages.findIndex(m => m.id === messageId);
-        if (fIdx !== -1) {
-            msg = group.messages[fIdx];
-            actualIndex = fIdx;
+    state._groupAlternateNavBusy = state._groupAlternateNavBusy || new Set();
+    if (state._groupAlternateNavBusy.has(index)) return;
+    state._groupAlternateNavBusy.add(index);
+
+    const groupId = state.currentGroupId;
+    const chatId = state.currentGroupChatId;
+
+    try {
+        const group = await api('GET', `/api/groups/${groupId}/chat/${chatId}`);
+        if (!group || group.error || !Array.isArray(group.messages)) {
+            if (group && group.error) toast(group.error, 'error');
+            return;
         }
+        if (state.currentGroupId !== groupId || state.currentGroupChatId !== chatId) return;
+
+        let msg = null;
+        let actualIndex = index;
+        if (messageId) {
+            const fIdx = group.messages.findIndex(m => m.id === messageId);
+            if (fIdx !== -1) {
+                msg = group.messages[fIdx];
+                actualIndex = fIdx;
+            }
+        }
+        if (!msg && group.messages[index]) {
+            msg = group.messages[index];
+        }
+        if (!msg || !msg.alternates || msg.alternates.length <= 1) return;
+
+        let newIndex = (msg.selectedAlternate || 0) + delta;
+        if (newIndex < 0) newIndex = msg.alternates.length - 1;
+        if (newIndex >= msg.alternates.length) newIndex = 0;
+
+        const res = await api('PUT', `/api/groups/${groupId}/alternate`, {
+            chatId: chatId,
+            messageIndex: actualIndex,
+            messageId: messageId || undefined,
+            selectedAlternate: newIndex
+        });
+        if (!res || res.error) {
+            toast((res && res.error) || 'Request failed', 'error');
+            return;
+        }
+        if (state.currentGroupId !== groupId || state.currentGroupChatId !== chatId) return;
+
+        msg.selectedAlternate = newIndex;
+        msg.content = msg.alternates[newIndex] || msg.content;
+        renderGroupMessages(group.messages, false);
+    } finally {
+        state._groupAlternateNavBusy.delete(index);
     }
-    if (!msg && group.messages[index]) {
-        msg = group.messages[index];
-    }
-    if (!msg || !msg.alternates || msg.alternates.length <= 1) return;
-
-    let newIndex = (msg.selectedAlternate || 0) + delta;
-    if (newIndex < 0) newIndex = msg.alternates.length - 1;
-    if (newIndex >= msg.alternates.length) newIndex = 0;
-
-    await api('PUT', `/api/groups/${state.currentGroupId}/alternate`, {
-        chatId: state.currentGroupChatId,
-        messageIndex: actualIndex,
-        messageId: messageId || undefined,
-        selectedAlternate: newIndex
-    });
-
-    msg.selectedAlternate = newIndex;
-    renderGroupMessages(group.messages);
 }
 window.changeGroupAlternate = changeGroupAlternate;
 
@@ -1396,6 +1538,20 @@ window.saveEditGroupMessage = async function (index, messageId) {
     }
 
     try {
+        // Snapshot existing alternates before edit so they are never lost
+        const prevAlternatesMap = new Map();
+        if (Array.isArray(state.currentGroupMessages)) {
+            state.currentGroupMessages.forEach((m, idx) => {
+                if (m && Array.isArray(m.alternates) && m.alternates.length > 0) {
+                    const key = m.id || `idx_${idx}`;
+                    prevAlternatesMap.set(key, {
+                        alternates: [...m.alternates],
+                        selectedAlternate: m.selectedAlternate || 0
+                    });
+                }
+            });
+        }
+
         const payload = {
             messageIndex: index,
             content: newContent
@@ -1404,8 +1560,8 @@ window.saveEditGroupMessage = async function (index, messageId) {
 
         const result = await api('PUT', `/api/groups/${requestGroupId}/chat/${requestChatId}/message`, payload);
 
-        if (result && result.error) {
-            toast(result.error, 'error');
+        if (!result || result.error) {
+            toast((result && result.error) || 'Request failed', 'error');
             if (btn) {
                 btn.disabled = false;
                 btn.textContent = t('btn.save') || 'Save';
@@ -1415,8 +1571,24 @@ window.saveEditGroupMessage = async function (index, messageId) {
 
         if (state.currentGroupId === requestGroupId && state.currentGroupChatId === requestChatId) {
             const fresh = await api('GET', `/api/groups/${requestGroupId}/chat/${requestChatId}`);
-            if (fresh && Array.isArray(fresh.messages)) {
-                renderGroupMessages(fresh.messages);
+            if (fresh && Array.isArray(fresh.messages) && state.currentGroupId === requestGroupId && state.currentGroupChatId === requestChatId) {
+                fresh.messages.forEach((m, idx) => {
+                    const key = m.id || `idx_${idx}`;
+                    const savedAlt = prevAlternatesMap.get(key) || (idx === index ? prevAlternatesMap.get(`idx_${index}`) : null);
+                    if (savedAlt && (!Array.isArray(m.alternates) || m.alternates.length === 0)) {
+                        m.alternates = [...savedAlt.alternates];
+                        m.selectedAlternate = savedAlt.selectedAlternate;
+                    }
+                    const isEditedMsg = (messageId && m.id === messageId) || (!messageId && idx === index);
+                    if (isEditedMsg) {
+                        m.content = newContent;
+                        if (Array.isArray(m.alternates)) {
+                            const selIdx = m.selectedAlternate || 0;
+                            m.alternates[selIdx] = newContent;
+                        }
+                    }
+                });
+                renderGroupMessages(fresh.messages, false);
             }
         }
     } catch (err) {
@@ -1429,15 +1601,24 @@ window.saveEditGroupMessage = async function (index, messageId) {
 };
 
 async function deleteGroupMessage(index, messageId) {
-    if (!state.currentGroupChatId) return;
+    if (!state.currentGroupId || !state.currentGroupChatId) return;
     if (!confirm(t('chat.confirm_delete_msg') || 'Hapus pesan ini?')) return;
+    const groupId = state.currentGroupId;
+    const chatId = state.currentGroupChatId;
     const target = messageId || index;
     try {
-        await api('DELETE', `/api/groups/${state.currentGroupId}/chat/${state.currentGroupChatId}/message/${target}`);
-        const fresh = await api('GET', `/api/groups/${state.currentGroupId}/chat/${state.currentGroupChatId}`);
+        const res = await api('DELETE', `/api/groups/${groupId}/chat/${chatId}/message/${target}`);
+        if (!res || res.error) {
+            toast((res && res.error) || 'Request failed', 'error');
+            return;
+        }
+        if (state.currentGroupId !== groupId || state.currentGroupChatId !== chatId) return;
+
+        const fresh = await api('GET', `/api/groups/${groupId}/chat/${chatId}`);
+        if (state.currentGroupId !== groupId || state.currentGroupChatId !== chatId) return;
         if (fresh && Array.isArray(fresh.messages)) {
-            renderGroupMessages(fresh.messages);
-            const sChat = state.groupChats.find(c => c.id === state.currentGroupChatId);
+            renderGroupMessages(fresh.messages, false);
+            const sChat = state.groupChats.find(c => c.id === chatId);
             if (sChat) {
                 sChat.messageCount = fresh.messages.length;
                 renderGroupChatList();
@@ -1475,6 +1656,8 @@ function openNewGroupModal() {
     if (pToggle) pToggle.classList.remove('active');
 
     state.groupModalSelectedIds = new Set();
+    const searchInput = $('#group-modal-member-search');
+    if (searchInput) searchInput.value = '';
     renderGroupModalMemberPicker();
     openModal('modal-group');
 }
@@ -1506,7 +1689,10 @@ function openEditGroupModal(groupId) {
     const pToggle = $('#group-avatar-pinterest-toggle');
     if (pToggle) pToggle.classList.remove('active');
 
-    state.groupModalSelectedIds = new Set(group.characterIds || []);
+    const validCharIds = (group.characterIds || []).filter(cid => state.characters.some(c => c.id === cid));
+    state.groupModalSelectedIds = new Set(validCharIds);
+    const searchInput = $('#group-modal-member-search');
+    if (searchInput) searchInput.value = '';
     renderGroupModalMemberPicker();
     openModal('modal-group');
 }
@@ -1597,10 +1783,18 @@ async function saveGroup() {
         const preservedChatId = wasCurrentGroup ? state.currentGroupChatId : null;
 
         if (editId) {
-            await api('PUT', `/api/groups/${editId}`, payload);
+            const res = await api('PUT', `/api/groups/${editId}`, payload);
+            if (!res || res.error) {
+                toast((res && res.error) || 'Request failed', 'error');
+                return;
+            }
             toast(t('toast.group_updated') || 'Grup berhasil diperbarui!', 'success');
         } else {
             const created = await api('POST', '/api/groups', payload);
+            if (!created || created.error) {
+                toast((created && created.error) || 'Request failed', 'error');
+                return;
+            }
             toast(t('toast.group_created') || 'Grup berhasil dibuat!', 'success');
             editId = created.id;
         }
@@ -1625,7 +1819,11 @@ async function confirmDeleteGroup() {
     if (!confirm('Hapus grup ini beserta seluruh riwayat obrolannya?')) return;
 
     try {
-        await api('DELETE', `/api/groups/${editId}`);
+        const res = await api('DELETE', `/api/groups/${editId}`);
+        if (!res || res.error) {
+            toast((res && res.error) || 'Request failed', 'error');
+            return;
+        }
         toast(t('toast.group_deleted') || 'Grup berhasil dihapus', 'info');
         closeModal('modal-group');
         state.currentGroupId = null;
@@ -1689,11 +1887,11 @@ function renderChatList() {
     list.innerHTML = state.chats.map(c => `
         <div class="chat-item ${c.id === state.currentChatId ? 'active' : ''}"
              data-id="${c.id}" onclick="loadChat('${c.id}')">
-            <span class="chat-item-icon">💬</span>
+            <span class="chat-item-icon">${UI_ICONS.chat}</span>
             <span class="chat-item-title">${escapeHtml(c.title)}</span>
             ${state.unreadChats.has(c.id) ? '<span class="chat-item-unread-dot" title="New reply"></span>' : ''}
             <div class="chat-item-actions">
-                <button class="chat-item-edit" onclick="event.stopPropagation(); startRenameChat('${c.id}')" title="Rename">✏️</button>
+                <button class="chat-item-edit" onclick="event.stopPropagation(); startRenameChat('${c.id}')" title="Rename">${UI_ICONS.edit}</button>
                 <button class="chat-item-delete" onclick="event.stopPropagation(); deleteChat('${c.id}')" title="Delete">✕</button>
             </div>
         </div>
@@ -1723,6 +1921,10 @@ async function startNewChat() {
         title: 'New Chat',
         messages: initialMessages
     });
+    if (!chat || chat.error) {
+        toast((chat && chat.error) || 'Failed to create chat', 'error');
+        return;
+    }
 
     // Reload chat list for whichever character this was created for
     const chats = await api('GET', `/api/chats/${characterIdAtStart}`);
@@ -1730,7 +1932,7 @@ async function startNewChat() {
     if (myToken !== state._chatNavToken) return; // superseded by a newer navigation
 
     state.currentChatId = chat.id;
-    state.chats = chats;
+    state.chats = Array.isArray(chats) ? chats : [chat];
     renderChatList();
     renderMessages(chat.messages || []);
     showView('view-chat');
@@ -1738,7 +1940,7 @@ async function startNewChat() {
     updateChatSendingUI();
 }
 
-async function loadChat(chatId) {
+async function loadChat(chatId, shouldScroll = true) {
     state.currentGroupId = null;
     state.currentGroupChatId = null;
     const speakerContainer = $('#group-speaker-container');
@@ -1748,9 +1950,6 @@ async function loadChat(chatId) {
     const groupChatList = $('#group-chat-list');
     if (groupChatList) groupChatList.style.display = 'none';
     renderGroupList();
-
-    // Reset status to Online for single character
-    $('#chat-header-status').textContent = t('chat.status.online') || 'Online';
 
     // A monotonic token shared with startNewChat/deleteChat: whichever
     // call is the most recent one wins, regardless of which of several
@@ -1765,7 +1964,7 @@ async function loadChat(chatId) {
     state.currentChatId = chatId;
     state.unreadChats.delete(chatId);
     renderChatList();
-    renderMessages(chat.messages || []);
+    renderMessages(chat.messages || [], shouldScroll);
     closeSidebarOnMobile();
     updateChatSendingUI();
 }
@@ -1782,15 +1981,20 @@ async function deleteChat(chatId) {
     const myToken = ++state._chatNavToken;
 
     try {
-        await api('DELETE', `/api/chat/${chatId}`);
+        const res = await api('DELETE', `/api/chat/${chatId}`);
+        if (!res || res.error) {
+            toast((res && res.error) || 'Failed to delete chat', 'error');
+            return;
+        }
 
         if (state.currentChatId === chatId) {
             state.currentChatId = null;
             state.currentMessages = [];
         }
 
-        state.chats = await api('GET', `/api/chats/${state.currentCharacterId}`);
+        const chats = await api('GET', `/api/chats/${state.currentCharacterId}`);
         if (myToken !== state._chatNavToken) return; // a newer navigation took over meanwhile
+        state.chats = Array.isArray(chats) ? chats : [];
         renderChatList();
 
         if (state.chats.length > 0) {
@@ -1807,22 +2011,26 @@ async function deleteChat(chatId) {
 //  MESSAGES
 // ══════════════════════════════════════════════════════════
 
-function renderMessages(messages) {
+function renderMessages(messages, shouldScroll = true) {
     state.currentMessages = Array.isArray(messages) ? messages : [];
     const currentChat = state.chats.find(c => c.id === state.currentChatId);
     if (currentChat) {
         currentChat.messages = state.currentMessages;
     }
     const container = $('#chat-messages');
+    if (!container) return;
+    const prevScrollTop = container.scrollTop;
+
     const char = state.characters.find(c => c.id === state.currentCharacterId);
     const charAvatar = char ? getAvatarInnerHtml(char.avatar, char.name) : 'A';
 
     if (!messages || messages.length === 0) {
         container.innerHTML = `
             <div class="empty-chat">
-                <div class="empty-chat-icon">💬</div>
+                <div class="empty-chat-icon">${UI_ICONS.chat}</div>
                 <p>${t('chat.empty')}</p>
             </div>`;
+        updateJumpToLatestBtn();
         return;
     }
 
@@ -1849,29 +2057,35 @@ function renderMessages(messages) {
             contentHtml = formatMessageContent(m.alternates[selIdx] || m.content);
         }
 
-        const regenerateBtn = isLastAssistant ? `<button class="regenerate-btn" onclick="regenerateLastMessage()" title="${t('chat.action.regenerate') || 'Regenerate'}">🔄</button>` : '';
+        const regenerateBtn = isLastAssistant ? `<button class="regenerate-btn" onclick="regenerateLastMessage()" title="${t('chat.action.regenerate') || 'Regenerate'}">${UI_ICONS.regen}</button>` : '';
         const touchEvents = isLastAssistant ? 'ontouchstart="handleTouchStart(event)" ontouchend="handleTouchEnd(event, this)"' : '';
         const msgId = m.id || '';
 
         return `
             <div class="message ${m.role}" data-index="${index}" data-id="${msgId}">
                 <div class="message-avatar">${avatar}</div>
-                <div style="flex:1; min-width:0;">
+                <div>
                     <div class="message-bubble-container" ${touchEvents}>
-                        <div class="message-bubble" style="width:100%">${contentHtml}</div>
+                        <div class="message-bubble">${contentHtml}</div>
                         ${regenerateBtn}
                     </div>
                     ${alternatesHtml}
                     <div class="message-meta">
                         ${time ? `<span class="message-time">${time}</span>` : ''}
-                        <button class="message-action-btn" onclick="editMessage(${index}, '${msgId}')" title="${t('chat.action.edit') || t('btn.edit') || 'Edit'}">✏️</button>
-                        <button class="message-action-btn message-delete-btn" onclick="deleteMessage(${index}, '${msgId}')" title="${t('chat.action.delete') || 'Hapus'}">🗑️</button>
+                        <button class="message-action-btn" onclick="copyMessageText(this)" title="${t('chat.action.copy') || 'Copy'}">${UI_ICONS.copy}</button>
+                        <button class="message-action-btn" onclick="editMessage(${index}, '${msgId}')" title="${t('chat.action.edit') || t('btn.edit') || 'Edit'}">${UI_ICONS.edit}</button>
+                        <button class="message-action-btn message-delete-btn" onclick="deleteMessage(${index}, '${msgId}')" title="${t('chat.action.delete') || 'Hapus'}">${UI_ICONS.trash}</button>
                     </div>
                 </div>
             </div>`;
     }).join('');
 
-    scrollToBottom();
+    if (shouldScroll) {
+        scrollToBottom();
+    } else {
+        container.scrollTop = prevScrollTop;
+        updateJumpToLatestBtn();
+    }
 }
 
 function appendMessage(role, content, isLastAssistant = false, messageId = null) {
@@ -1909,7 +2123,7 @@ function appendMessage(role, content, isLastAssistant = false, messageId = null)
     const avatar = role === 'user' ? userAvatar : charAvatar;
     const time = formatTime(new Date().toISOString());
     const index = document.querySelectorAll('#chat-messages .message').length;
-    const regenerateBtn = isLastAssistant ? `<button class="regenerate-btn" onclick="regenerateLastMessage()" title="${t('chat.action.regenerate') || 'Regenerate'}">🔄</button>` : '';
+    const regenerateBtn = isLastAssistant ? `<button class="regenerate-btn" onclick="regenerateLastMessage()" title="${t('chat.action.regenerate') || 'Regenerate'}">${UI_ICONS.regen}</button>` : '';
     const touchEvents = isLastAssistant ? 'ontouchstart="handleTouchStart(event)" ontouchend="handleTouchEnd(event, this)"' : '';
     const msgId = messageId || '';
 
@@ -1919,15 +2133,16 @@ function appendMessage(role, content, isLastAssistant = false, messageId = null)
     div.dataset.id = msgId;
     div.innerHTML = `
         <div class="message-avatar">${avatar}</div>
-        <div style="flex:1; min-width:0;">
+        <div>
             <div class="message-bubble-container" ${touchEvents}>
-                <div class="message-bubble" style="width:100%">${formatMessageContent(content)}</div>
+                <div class="message-bubble">${formatMessageContent(content)}</div>
                 ${regenerateBtn}
             </div>
             <div class="message-meta">
                 <span class="message-time">${time}</span>
-                <button class="message-action-btn" onclick="editMessage(${index}, '${msgId}')" title="${t('chat.action.edit') || t('btn.edit') || 'Edit'}">✏️</button>
-                <button class="message-action-btn message-delete-btn" onclick="deleteMessage(${index}, '${msgId}')" title="${t('chat.action.delete') || 'Hapus'}">🗑️</button>
+                <button class="message-action-btn" onclick="copyMessageText(this)" title="${t('chat.action.copy') || 'Copy'}">${UI_ICONS.copy}</button>
+                <button class="message-action-btn" onclick="editMessage(${index}, '${msgId}')" title="${t('chat.action.edit') || t('btn.edit') || 'Edit'}">${UI_ICONS.edit}</button>
+                <button class="message-action-btn message-delete-btn" onclick="deleteMessage(${index}, '${msgId}')" title="${t('chat.action.delete') || 'Hapus'}">${UI_ICONS.trash}</button>
             </div>
         </div>`;
     container.appendChild(div);
@@ -1935,12 +2150,39 @@ function appendMessage(role, content, isLastAssistant = false, messageId = null)
     return div;
 }
 
-function scrollToBottom() {
+function isNearBottom(container, threshold = 160) {
+    if (!container) return true;
+    return (container.scrollHeight - container.scrollTop - container.clientHeight) <= threshold;
+}
+
+function updateJumpToLatestBtn() {
     const container = $('#chat-messages');
+    const jumpBtn = $('#btn-jump-latest');
+    if (!container || !jumpBtn) return;
+    const inputContainer = $('.chat-input-container');
+    if (inputContainer && inputContainer.offsetHeight > 0) {
+        jumpBtn.style.bottom = (inputContainer.offsetHeight + 12) + 'px';
+    }
+    if (isNearBottom(container, 160)) {
+        jumpBtn.classList.remove('visible');
+    } else {
+        jumpBtn.classList.add('visible');
+    }
+}
+
+function scrollToBottom(smooth = false) {
+    const container = $('#chat-messages');
+    if (!container) return;
     requestAnimationFrame(() => {
-        container.scrollTop = container.scrollHeight;
+        if (smooth) {
+            container.scrollTo({ top: container.scrollHeight, behavior: 'smooth' });
+        } else {
+            container.scrollTop = container.scrollHeight;
+        }
+        updateJumpToLatestBtn();
     });
 }
+window.scrollToBottom = scrollToBottom;
 
 // ══════════════════════════════════════════════════════════
 //  SEND MESSAGE
@@ -1972,6 +2214,7 @@ async function sendMessage() {
     // Show user message immediately with a unique ID
     const userMsgId = (typeof crypto !== 'undefined' && crypto.randomUUID) ? crypto.randomUUID() : ('msg-' + Date.now() + '-' + Math.random().toString(36).substring(2, 9));
     const userBubble = appendMessage('user', text, false, userMsgId);
+    const editCountAtStart = state._chatEditedDuringSend || 0;
 
     // Update typing indicator & send button for this chat
     updateChatSendingUI();
@@ -1988,15 +2231,24 @@ async function sendMessage() {
             // The message was never saved server-side — remove the phantom
             // bubble and give the text back so the user can retry.
             if (state.currentChatId === requestChatId && !state.currentGroupId) {
-                if (userBubble) userBubble.remove();
-                if (Array.isArray(state.currentMessages) && state.currentMessages.length > 0) {
-                    state.currentMessages.pop();
+                if (userBubble && userBubble.isConnected) userBubble.remove();
+                if (Array.isArray(state.currentMessages)) {
+                    const uIdx = state.currentMessages.findIndex(m => m.id === userMsgId);
+                    if (uIdx !== -1) state.currentMessages.splice(uIdx, 1);
+                }
+                if ((state._chatEditedDuringSend || 0) !== editCountAtStart) {
+                    await loadChat(requestChatId, false);
                 }
                 input.value = text;
                 autoResizeInput();
             }
             toast(result.error, 'error');
             return;
+        }
+
+        if (result.chatTitle && Array.isArray(state.chats)) {
+            const cItem = state.chats.find(c => c.id === requestChatId);
+            if (cItem) cItem.title = result.chatTitle;
         }
 
         if (state.currentChatId !== requestChatId || state.currentGroupId) {
@@ -2011,11 +2263,21 @@ async function sendMessage() {
             return;
         }
 
-        // Show assistant response
-        appendMessage('assistant', result.content, true, result.messageId);
+        // Remove any old .alternate-nav from previous messages (finalized by backend on new turn)
+        $$('#chat-messages .alternate-nav').forEach(el => el.remove());
+
+        if ((state._chatEditedDuringSend || 0) !== editCountAtStart) {
+            await loadChat(requestChatId);
+        } else {
+            // Show assistant response
+            appendMessage('assistant', result.content, true, result.messageId);
+        }
 
         // Refresh chat list (title might have changed)
-        state.chats = await api('GET', `/api/chats/${requestCharacterId}`);
+        const freshChats = await api('GET', `/api/chats/${requestCharacterId}`);
+        if (Array.isArray(freshChats)) {
+            state.chats = freshChats;
+        }
         const currentChatInList = state.chats.find(c => c.id === state.currentChatId);
         if (currentChatInList && state.currentMessages) {
             currentChatInList.messages = state.currentMessages;
@@ -2026,9 +2288,13 @@ async function sendMessage() {
 
     } catch (err) {
         if (state.currentChatId === requestChatId && !state.currentGroupId) {
-            if (userBubble) userBubble.remove();
-            if (Array.isArray(state.currentMessages) && state.currentMessages.length > 0) {
-                state.currentMessages.pop();
+            if (userBubble && userBubble.isConnected) userBubble.remove();
+            if (Array.isArray(state.currentMessages)) {
+                const uIdx = state.currentMessages.findIndex(m => m.id === userMsgId);
+                if (uIdx !== -1) state.currentMessages.splice(uIdx, 1);
+            }
+            if ((state._chatEditedDuringSend || 0) !== editCountAtStart) {
+                await loadChat(requestChatId, false);
             }
             input.value = text;
             autoResizeInput();
@@ -2105,7 +2371,7 @@ window.regenerateLastMessage = async function () {
     } finally {
         state.sendingChats.delete(requestChatId);
         if (state.currentChatId === requestChatId && !state.currentGroupId) {
-            if (btn) btn.innerHTML = '🔄';
+            if (btn) btn.innerHTML = UI_ICONS.regen;
             updateChatSendingUI();
         }
     }
@@ -2146,15 +2412,19 @@ window.changeAlternate = async function (msgIndex, delta, messageId) {
         if (sel >= msg.alternates.length) sel = msg.alternates.length - 1;
 
         msg.selectedAlternate = sel;
+        msg.content = msg.alternates[sel] || msg.content;
 
-        // Optimistic re-render
-        renderMessages(chat.messages);
+        // Optimistic re-render (preserve scroll position)
+        renderMessages(chat.messages, false);
 
-        await api('PUT', `/api/chat/${requestChatId}/alternate`, {
+        const res = await api('PUT', `/api/chat/${requestChatId}/alternate`, {
             messageIndex: actualIndex,
             messageId: messageId || undefined,
             selectedAlternate: sel
         });
+        if (res && res.error) {
+            toast(res.error, 'error');
+        }
     } finally {
         state._alternateNavBusy.delete(msgIndex);
     }
@@ -2219,7 +2489,10 @@ window.editMessage = async function (index, messageId) {
         textarea.style.height = Math.max(120, textarea.scrollHeight) + 'px';
     };
     textarea.addEventListener('input', resizeTextarea);
-    setTimeout(resizeTextarea, 0);
+    setTimeout(() => {
+        resizeTextarea();
+        textarea.focus();
+    }, 0);
 };
 
 window.cancelEdit = function (index, messageId) {
@@ -2260,16 +2533,31 @@ window.saveEdit = async function (index, messageId) {
     }
 
     try {
+        // Snapshot existing alternates before edit so they are never lost
+        const prevAlternatesMap = new Map();
+        if (Array.isArray(state.currentMessages)) {
+            state.currentMessages.forEach((m, idx) => {
+                if (m && Array.isArray(m.alternates) && m.alternates.length > 0) {
+                    const key = m.id || `idx_${idx}`;
+                    prevAlternatesMap.set(key, {
+                        alternates: [...m.alternates],
+                        selectedAlternate: m.selectedAlternate || 0
+                    });
+                }
+            });
+        }
+
         const payload = {
             messageIndex: index,
             content: newContent
         };
         if (messageId) payload.messageId = messageId;
 
+        state._chatEditedDuringSend = (state._chatEditedDuringSend || 0) + 1;
         const result = await api('PUT', `/api/chat/${requestChatId}/message`, payload);
 
-        if (result.error) {
-            toast(result.error, 'error');
+        if (!result || result.error) {
+            toast((result && result.error) || 'Request failed', 'error');
             if (btn) {
                 btn.disabled = false;
                 btn.textContent = t('btn.save');
@@ -2278,8 +2566,32 @@ window.saveEdit = async function (index, messageId) {
         }
 
         // Only refresh the rendered messages if the user is still on the chat that was just edited.
-        if (state.currentChatId === requestChatId) {
-            await loadChat(requestChatId);
+        if (state.currentChatId === requestChatId && !state.currentGroupId) {
+            const chat = await api('GET', `/api/chat/${requestChatId}`);
+            if (chat && Array.isArray(chat.messages) && state.currentChatId === requestChatId && !state.currentGroupId) {
+                let restoredAlternates = false;
+                chat.messages.forEach((m, idx) => {
+                    const key = m.id || `idx_${idx}`;
+                    const savedAlt = prevAlternatesMap.get(key) || (idx === index ? prevAlternatesMap.get(`idx_${index}`) : null);
+                    if (savedAlt && (!Array.isArray(m.alternates) || m.alternates.length === 0)) {
+                        m.alternates = [...savedAlt.alternates];
+                        m.selectedAlternate = savedAlt.selectedAlternate;
+                        restoredAlternates = true;
+                    }
+                    const isEditedMsg = (messageId && m.id === messageId) || (!messageId && idx === index);
+                    if (isEditedMsg) {
+                        m.content = newContent;
+                        if (Array.isArray(m.alternates)) {
+                            const selIdx = m.selectedAlternate || 0;
+                            m.alternates[selIdx] = newContent;
+                        }
+                    }
+                });
+                if (restoredAlternates) {
+                    await api('PUT', `/api/chat/${requestChatId}`, { messages: chat.messages });
+                }
+                renderMessages(chat.messages, false);
+            }
         }
     } catch (err) {
         toast(`Error: ${err.message}`, 'error');
@@ -2297,14 +2609,15 @@ window.deleteMessage = async function (index, messageId) {
     const requestChatId = state.currentChatId;
     const target = messageId || index;
     try {
+        state._chatEditedDuringSend = (state._chatEditedDuringSend || 0) + 1;
         const result = await api('DELETE', `/api/chat/${requestChatId}/message/${target}`);
-        if (result.error) {
-            toast(result.error, 'error');
+        if (!result || result.error) {
+            toast((result && result.error) || 'Request failed', 'error');
             return;
         }
 
-        if (state.currentChatId === requestChatId) {
-            await loadChat(requestChatId);
+        if (state.currentChatId === requestChatId && !state.currentGroupId) {
+            await loadChat(requestChatId, false);
             toast(t('chat.msg_deleted') || 'Pesan berhasil dihapus');
         }
     } catch (err) {
@@ -2435,8 +2748,7 @@ function renderPersonaSelector() {
     container.querySelectorAll('.persona-chip-btn').forEach(btn => {
         btn.addEventListener('click', () => {
             const id = btn.dataset.id;
-            state.memoryModalDraftPersonaId = id;
-            renderPersonaSelector();
+            selectMemoryPersona(id);
         });
     });
 
@@ -2465,6 +2777,46 @@ function renderPersonaSelector() {
         summaryEl.innerHTML = '';
     }
 }
+
+async function selectMemoryPersona(personaId) {
+    state.memoryModalDraftPersonaId = personaId;
+    if (!state.memory) {
+        state.memory = { facts: [], summaries: [], importantEvents: [], personaId };
+    } else {
+        state.memory.personaId = personaId;
+    }
+    renderPersonaSelector();
+
+    if (state.currentGroupId) {
+        const requestGroupId = state.currentGroupId;
+        const group = state.groups.find(g => g.id === requestGroupId);
+        if (group) {
+            group.activePersonaId = personaId;
+        }
+        const [grpRes, memRes] = await Promise.all([
+            api('PUT', `/api/groups/${requestGroupId}`, { activePersonaId: personaId }),
+            api('PUT', `/api/groups/${requestGroupId}/memory`, { ...state.memory, personaId })
+        ]);
+        if ((grpRes && grpRes.error) || (memRes && memRes.error)) {
+            toast((grpRes && grpRes.error) || (memRes && memRes.error), 'error');
+            return;
+        }
+        if (state.currentGroupId === requestGroupId && Array.isArray(state.currentGroupMessages) && state.currentGroupMessages.length > 0) {
+            renderGroupMessages(state.currentGroupMessages, false);
+        }
+    } else if (state.currentCharacterId) {
+        const requestCharacterId = state.currentCharacterId;
+        const res = await api('PUT', `/api/memory/${requestCharacterId}`, { ...state.memory, personaId });
+        if (res && res.error) {
+            toast(res.error, 'error');
+            return;
+        }
+        if (state.currentCharacterId === requestCharacterId && Array.isArray(state.currentMessages) && state.currentMessages.length > 0) {
+            renderMessages(state.currentMessages, false);
+        }
+    }
+}
+window.selectMemoryPersona = selectMemoryPersona;
 
 function removeMemoryItem(key, index) {
     if (!state.memory) return;
@@ -2504,17 +2856,22 @@ async function saveMemory() {
             state.memory.personaId = state.memoryModalDraftPersonaId;
         }
 
-        await api('PUT', `/api/groups/${requestGroupId}/memory`, state.memory);
+        const res = await api('PUT', `/api/groups/${requestGroupId}/memory`, state.memory);
+        if (!res || res.error) {
+            toast((res && res.error) || 'Failed to save group memory', 'error');
+            return;
+        }
         if (state.currentGroupId !== requestGroupId) return;
         const group = state.groups.find(g => g.id === requestGroupId);
         if (group && state.memory.personaId) {
             group.activePersonaId = state.memory.personaId;
+            await api('PUT', `/api/groups/${requestGroupId}`, { activePersonaId: state.memory.personaId });
         }
 
         if (state.currentGroupChatId) {
             const freshChat = await api('GET', `/api/groups/${requestGroupId}/chat/${state.currentGroupChatId}`);
             if (freshChat && Array.isArray(freshChat.messages)) {
-                renderGroupMessages(freshChat.messages);
+                renderGroupMessages(freshChat.messages, false);
             }
         }
 
@@ -2530,7 +2887,11 @@ async function saveMemory() {
         state.memory.personaId = state.memoryModalDraftPersonaId;
     }
 
-    await api('PUT', `/api/memory/${requestCharacterId}`, state.memory);
+    const res = await api('PUT', `/api/memory/${requestCharacterId}`, state.memory);
+    if (!res || res.error) {
+        toast((res && res.error) || 'Failed to save memory', 'error');
+        return;
+    }
     if (state.currentCharacterId !== requestCharacterId) return;
 
     if (state.currentChatId) {
@@ -2539,9 +2900,9 @@ async function saveMemory() {
             state.currentMessages = freshChat.messages;
             const currentChat = state.chats.find(c => c.id === state.currentChatId);
             if (currentChat) currentChat.messages = freshChat.messages;
-            renderMessages(freshChat.messages);
+            renderMessages(freshChat.messages, false);
         } else if (Array.isArray(state.currentMessages) && state.currentMessages.length > 0) {
-            renderMessages(state.currentMessages);
+            renderMessages(state.currentMessages, false);
         }
     }
 
@@ -2561,6 +2922,17 @@ async function summarizeMemory() {
         btn.innerHTML = '<span class="spinner"></span> ' + (t('btn.saving') || 'Menyimpan...');
 
         try {
+            if (state.memory) {
+                if (state.memoryModalDraftPersonaId) {
+                    state.memory.personaId = state.memoryModalDraftPersonaId;
+                }
+                const saveRes = await api('PUT', `/api/groups/${requestGroupId}/memory`, state.memory);
+                if (saveRes && saveRes.error) {
+                    toast(saveRes.error, 'error');
+                    return;
+                }
+            }
+
             const result = await api('POST', `/api/memory/${requestGroupId}/summarize`, {
                 chatId: state.currentGroupChatId,
                 isGroup: true
@@ -2600,6 +2972,17 @@ async function summarizeMemory() {
     btn.innerHTML = '<span class="spinner"></span> ' + t('btn.saving');
 
     try {
+        if (state.memory) {
+            if (state.memoryModalDraftPersonaId) {
+                state.memory.personaId = state.memoryModalDraftPersonaId;
+            }
+            const saveRes = await api('PUT', `/api/memory/${requestCharacterId}`, state.memory);
+            if (saveRes && saveRes.error) {
+                toast(saveRes.error, 'error');
+                return;
+            }
+        }
+
         const result = await api('POST', `/api/memory/${requestCharacterId}/summarize`, {
             chatId: state.currentChatId
         });
@@ -2684,15 +3067,50 @@ function escapeHtml(text) {
     return div.innerHTML.replace(/"/g, '&quot;').replace(/'/g, '&#39;');
 }
 
+function formatInlineMarkdown(text) {
+    if (!text) return '';
+    // Combined outer-to-inner tokenizer so bold, italic (*...*), and dialogue quotes ("...")
+    // never produce crossed/misnested HTML tags.
+    const tokenRegex = /(?<!\*)\*\*\*(?!\s|\*)((?:(?!\*\*\*)[^\n]|\n(?!\n))+?)(?<!\s|\*)\*\*\*(?!\*)|(?<!\*)\*\*(?!\s|\*)((?:(?!\*\*)[^\n]|\n(?!\n))+?)(?<!\s|\*)\*\*(?!\*)|\b__([^\n_]+)__\b|(?<!\*)\*(?!\s|\*)((?:[^\*\n]|\n(?!\n))+?)(?<!\s|\*)\*(?!\*)|(?:&quot;|“)((?:(?!(?:&quot;|”|“)).|\n(?!\n))+?)(?:&quot;|”)/g;
+
+    return text.replace(tokenRegex, (match, boldItalic, boldStar, boldUnder, italic, dialog) => {
+        if (boldItalic !== undefined) {
+            return `<strong><em class="action-text">${formatInlineMarkdown(boldItalic)}</em></strong>`;
+        }
+        if (boldStar !== undefined) {
+            return `<strong>${formatInlineMarkdown(boldStar)}</strong>`;
+        }
+        if (boldUnder !== undefined) {
+            return `<strong>${formatInlineMarkdown(boldUnder)}</strong>`;
+        }
+        if (italic !== undefined) {
+            return `<em class="action-text">${formatInlineMarkdown(italic)}</em>`;
+        }
+        if (dialog !== undefined) {
+            return `<span class="dialog-text">&quot;${formatInlineMarkdown(dialog)}&quot;</span>`;
+        }
+        return match;
+    });
+}
+
 function formatMessageContent(content) {
     if (!content) return '';
     let html = escapeHtml(content);
 
-    // Protect code blocks and inline code from markdown formatting
+    // Protect fenced code blocks and inline code from markdown formatting
     const codeBlocks = [];
-    html = html.replace(/```([a-zA-Z0-9_-]*)\n?([\s\S]*?)```/g, (match, lang, code) => {
+    html = html.replace(/```([a-zA-Z0-9_+#.-]*)[ \t]*\n?([\s\S]*?)```/g, (match, lang, code) => {
         const idx = codeBlocks.length;
-        codeBlocks.push(`<pre><code class="language-${lang}">${code}</code></pre>`);
+        const langLabel = (lang || 'code').toLowerCase();
+        codeBlocks.push(`
+            <div class="code-block-wrapper">
+                <div class="code-block-header">
+                    <span>${escapeHtml(langLabel)}</span>
+                    <button type="button" class="code-copy-btn" onclick="copyCodeBlock(this)">${t('chat.action.copy') || 'Copy'}</button>
+                </div>
+                <pre><code class="language-${escapeHtml(langLabel)}">${code}</code></pre>
+            </div>
+        `.trim());
         return `@@CODE_BLOCK_${idx}@@`;
     });
     html = html.replace(/`([^`\n]+)`/g, (match, code) => {
@@ -2701,27 +3119,107 @@ function formatMessageContent(content) {
         return `@@CODE_BLOCK_${idx}@@`;
     });
 
-    // Bold-italic: ***text***
-    html = html.replace(/(?<!\*)\*\*\*(?!\s|\*)((?:(?!\*\*\*)[^\n]|\n(?!\n))+?)(?<!\s|\*)\*\*\*(?!\*)/g, '<strong><em class="action-text">$1</em></strong>');
+    // Markdown tables: detect contiguous lines starting and ending with | and a separator row with at least one -
+    html = html.replace(/(?:^|\n)(\|.+\|[ \t]*\n\|[\s:\-|]*-[\s:\-|]*\|[ \t]*(?:\n\|.+\|[ \t]*)*)/g, (match, tableBlock) => {
+        const lines = tableBlock.trim().split('\n').map(l => l.trim()).filter(Boolean);
+        if (lines.length < 2) return match;
+        if (!/^\|[\s:\-|]*-[\s:\-|]*\|$/.test(lines[1])) return match;
+        const parseRow = (line) => line.replace(/^\||\|$/g, '').split('|').map(c => formatInlineMarkdown(c.trim()));
+        const headers = parseRow(lines[0]);
+        const bodyRows = lines.slice(2).map(parseRow);
+        const thead = `<thead><tr>${headers.map(h => `<th>${h}</th>`).join('')}</tr></thead>`;
+        const tbody = bodyRows.length
+            ? `<tbody>${bodyRows.map(r => `<tr>${r.map(c => `<td>${c}</td>`).join('')}</tr>`).join('')}</tbody>`
+            : '';
+        const idx = codeBlocks.length;
+        codeBlocks.push(`<div class="table-wrap"><table class="message-table">${thead}${tbody}</table></div>`);
+        return `\n@@CODE_BLOCK_${idx}@@`;
+    });
 
-    // Bold: **text** (and __text__)
-    html = html.replace(/(?<!\*)\*\*(?!\s|\*)((?:(?!\*\*)[^\n]|\n(?!\n))+?)(?<!\s|\*)\*\*(?!\*)/g, '<strong>$1</strong>');
-    html = html.replace(/\b__([^\n_]+)__\b/g, '<strong>$1</strong>');
+    // Apply inline markdown formatting (bold, italic/action, dialogue quotes)
+    html = formatInlineMarkdown(html);
 
-    // Italic / Action text: *action*
-    html = html.replace(/(?<!\*)\*(?!\s|\*)((?:[^\*\n]|\n(?!\n))+?)(?<!\s|\*)\*(?!\*)/g, '<em class="action-text">$1</em>');
+    // Paragraphs & line breaks: split double newlines into comfortable paragraphs, single newlines into <br>
+    html = html
+        .split(/\n{2,}/)
+        .map(para => `<p class="msg-para">${para.replace(/\n/g, '<br>')}</p>`)
+        .join('');
 
-    // Dialogue text in quotes: "dialog"
-    html = html.replace(/(?:&quot;|“)((?:(?!(?:&quot;|”|“)).|\n(?!\n))+?)(?:&quot;|”)/g, '<span class="dialog-text">&quot;$1&quot;</span>');
-
-    // Line breaks
-    html = html.replace(/\n/g, '<br>');
-
-    // Restore protected code blocks
-    html = html.replace(/@@CODE_BLOCK_(\d+)@@/g, (_, idx) => codeBlocks[Number(idx)] || '');
+    // Restore protected code blocks & tables (loop so nested inline code in tables is also restored)
+    let guard = 0;
+    while (/@@CODE_BLOCK_\d+@@/.test(html) && guard++ < 10) {
+        html = html.replace(/@@CODE_BLOCK_(\d+)@@/g, (_, idx) => codeBlocks[Number(idx)] || '');
+    }
 
     return html;
 }
+
+async function copyToClipboard(text) {
+    if (navigator.clipboard && window.isSecureContext) {
+        try {
+            await navigator.clipboard.writeText(text);
+            return true;
+        } catch {
+            // Fall through to execCommand fallback
+        }
+    }
+    const ta = document.createElement('textarea');
+    ta.value = text;
+    ta.setAttribute('readonly', '');
+    ta.style.position = 'fixed';
+    ta.style.top = '-9999px';
+    ta.style.left = '-9999px';
+    ta.style.opacity = '0';
+    document.body.appendChild(ta);
+    ta.focus();
+    ta.select();
+    ta.setSelectionRange(0, text.length);
+    let ok = false;
+    try {
+        ok = document.execCommand('copy');
+    } catch {
+        ok = false;
+    }
+    document.body.removeChild(ta);
+    return ok;
+}
+
+window.copyCodeBlock = async function (btn) {
+    if (!btn) return;
+    const wrapper = btn.closest('.code-block-wrapper');
+    const codeEl = wrapper ? wrapper.querySelector('pre code') : null;
+    if (!codeEl) return;
+    const ok = await copyToClipboard(codeEl.textContent || '');
+    if (ok) {
+        const original = btn.textContent;
+        btn.textContent = t('chat.copied') || 'Copied';
+        setTimeout(() => { btn.textContent = original; }, 1600);
+    } else {
+        toast('Failed to copy code', 'error');
+    }
+};
+
+window.copyMessageText = async function (btn) {
+    if (!btn) return;
+    const msgEl = btn.closest('.message');
+    const bubbleEl = msgEl ? msgEl.querySelector('.message-bubble') : null;
+    if (!bubbleEl) return;
+    const clone = bubbleEl.cloneNode(true);
+    clone.querySelectorAll('.code-block-header').forEach(el => el.remove());
+    clone.querySelectorAll('br').forEach(br => br.replaceWith('\n'));
+    const paras = clone.querySelectorAll('.msg-para');
+    const textToCopy = paras.length > 0
+        ? Array.from(paras).map(p => p.textContent).join('\n\n')
+        : (clone.innerText || clone.textContent || '');
+    const ok = await copyToClipboard(textToCopy);
+    if (ok) {
+        const originalHtml = btn.innerHTML;
+        btn.innerHTML = UI_ICONS.check;
+        setTimeout(() => { btn.innerHTML = originalHtml; }, 1400);
+    } else {
+        toast('Failed to copy message', 'error');
+    }
+};
 
 function formatTime(isoString) {
     try {
@@ -2736,6 +3234,9 @@ function autoResizeInput() {
     const input = $('#chat-input');
     input.style.height = 'auto';
     input.style.height = Math.min(input.scrollHeight, 150) + 'px';
+    if (typeof updateJumpToLatestBtn === 'function') {
+        updateJumpToLatestBtn();
+    }
 }
 
 // ══════════════════════════════════════════════════════════
@@ -2903,7 +3404,7 @@ function bindEvents() {
     $$('.modal-overlay').forEach(overlay => {
         overlay.addEventListener('click', (e) => {
             if (e.target === overlay) {
-                overlay.classList.remove('show');
+                closeModal(overlay.id);
             }
         });
     });
@@ -2911,7 +3412,24 @@ function bindEvents() {
     // Escape key to close modals
     document.addEventListener('keydown', (e) => {
         if (e.key === 'Escape') {
-            $$('.modal-overlay.show').forEach(m => m.classList.remove('show'));
+            $$('.modal-overlay.show').forEach(m => closeModal(m.id));
+        }
+    });
+
+    // Scroll preservation & Jump to latest button
+    const chatMessagesEl = $('#chat-messages');
+    if (chatMessagesEl) {
+        chatMessagesEl.addEventListener('scroll', updateJumpToLatestBtn, { passive: true });
+    }
+    const jumpLatestBtn = $('#btn-jump-latest');
+    if (jumpLatestBtn) {
+        jumpLatestBtn.addEventListener('click', () => scrollToBottom(true));
+    }
+
+    // Multi-tab synchronization for theme & storage changes
+    window.addEventListener('storage', (e) => {
+        if (e.key === 'aichat-theme-palette' && window.AIChatTheme) {
+            window.AIChatTheme.apply(window.AIChatTheme.load());
         }
     });
 }
@@ -2932,11 +3450,13 @@ function handleAvatarUpload(e) {
 
     if (!file.type.startsWith('image/')) {
         toast('Pilih file gambar (JPG, PNG, GIF, WebP)', 'error');
+        e.target.value = '';
         return;
     }
 
     if (file.size > 5 * 1024 * 1024) {
         toast('Ukuran file maksimal 5MB', 'error');
+        e.target.value = '';
         return;
     }
 
@@ -2970,9 +3490,16 @@ function handleAvatarUpload(e) {
             $('#char-avatar').value = dataUrl;
             updateAvatarPreview(dataUrl);
         };
+        img.onerror = function () {
+            toast('Gagal memuat file gambar avatar', 'error');
+        };
         img.src = event.target.result;
     };
+    reader.onerror = function () {
+        toast('Gagal membaca file gambar', 'error');
+    };
     reader.readAsDataURL(file);
+    e.target.value = '';
 }
 
 function removeAvatar() {
@@ -2987,11 +3514,13 @@ function handleGroupAvatarUpload(e) {
 
     if (!file.type.startsWith('image/')) {
         toast('Pilih file gambar (JPG, PNG, GIF, WebP)', 'error');
+        e.target.value = '';
         return;
     }
 
     if (file.size > 5 * 1024 * 1024) {
         toast('Ukuran file maksimal 5MB', 'error');
+        e.target.value = '';
         return;
     }
 
@@ -3005,7 +3534,11 @@ function handleGroupAvatarUpload(e) {
             toast('Gagal memproses gambar avatar grup', 'error');
         }
     };
+    reader.onerror = function () {
+        toast('Gagal membaca file gambar', 'error');
+    };
     reader.readAsDataURL(file);
+    e.target.value = '';
 }
 
 // ══════════════════════════════════════════════════════════
@@ -3265,7 +3798,7 @@ window.startRenameChat = function (chatId) {
 
     chatItem.removeAttribute('onclick');
     chatItem.innerHTML = `
-        <span class="chat-item-icon">💬</span>
+        <span class="chat-item-icon">${UI_ICONS.chat}</span>
         <div class="chat-item-rename-container">
             <input type="text" class="chat-item-rename-input" value="${escapeHtml(currentTitle)}"
                    data-chat-id="${chatId}" autocomplete="off">
@@ -3300,7 +3833,12 @@ window.saveRenameChat = async function (chatId) {
     const requestCharacterId = state.currentCharacterId; // capture before the await
 
     try {
-        await api('PUT', `/api/chat/${chatId}`, { title: newTitle });
+        const res = await api('PUT', `/api/chat/${chatId}`, { title: newTitle });
+        if (!res || res.error) {
+            toast((res && res.error) || 'Request failed', 'error');
+            if (state.currentCharacterId === requestCharacterId) renderChatList();
+            return;
+        }
 
         // If the user switched characters while this PUT was in flight,
         // state.chats now belongs to a different character and won't

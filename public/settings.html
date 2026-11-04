@@ -5,12 +5,10 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Settings — AI Character Chat</title>
-    <meta name="description" content="App settings: configuration, appearance and more">
+    <meta name="description" content="Local-first configuration, personas, appearance, and data management">
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link
-        href="https://fonts.googleapis.com/css2?family=Newsreader:ital,opsz,wght@0,6..72,400;0,6..72,500;0,6..72,600;1,6..72,400&family=Inter:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap"
-        rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:ital,wght@0,400;0,500;0,600;0,700;1,400;1,500&family=Roboto:ital,wght@0,400;0,500;1,400&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="/styles.css">
     <!-- Blocking, not deferred: applies the saved palette before this page paints. -->
     <script src="/theme.js"></script>
@@ -22,52 +20,90 @@
         <div class="settings-shell">
             <div class="settings-topbar">
                 <a class="settings-back" href="/index.html" aria-label="Back to chat" title="Back to chat">
-                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                         <line x1="19" y1="12" x2="5" y2="12" />
                         <polyline points="12 19 5 12 12 5" />
                     </svg>
                 </a>
-                <div class="settings-title">⚙️ Settings</div>
+                <div class="settings-title">Settings</div>
             </div>
 
             <div class="settings-layout">
                 <nav class="settings-nav" aria-label="Settings sections">
-                    <button class="settings-nav-item active" type="button" data-tab="configuration">🌐
-                        Configuration</button>
-                    <button class="settings-nav-item" type="button" data-tab="persona">👤 Persona</button>
-                    <button class="settings-nav-item" type="button" data-tab="appearance">🎨 Appearance</button>
-                    <button class="settings-nav-item" type="button" data-tab="notifications">🔔 Notifications</button>
-                    <button class="settings-nav-item" type="button" data-tab="data-backup">💾 Data &amp; backup</button>
+                    <button class="settings-nav-item active" type="button" data-tab="configuration">
+                        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <rect x="2" y="2" width="20" height="8" rx="2" ry="2"/>
+                            <rect x="2" y="14" width="20" height="8" rx="2" ry="2"/>
+                            <line x1="6" y1="6" x2="6.01" y2="6"/>
+                            <line x1="6" y1="18" x2="6.01" y2="18"/>
+                        </svg>
+                        <span>Configuration</span>
+                    </button>
+                    <button class="settings-nav-item" type="button" data-tab="persona">
+                        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/>
+                            <circle cx="12" cy="7" r="4"/>
+                        </svg>
+                        <span>Persona</span>
+                    </button>
+                    <button class="settings-nav-item" type="button" data-tab="appearance">
+                        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <circle cx="12" cy="12" r="10"/>
+                            <path d="M12 2a7 7 0 1 0 10 10"/>
+                        </svg>
+                        <span>Appearance</span>
+                    </button>
+                    <button class="settings-nav-item" type="button" data-tab="notifications">
+                        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/>
+                            <path d="M13.73 21a2 2 0 0 1-3.46 0"/>
+                        </svg>
+                        <span>Notifications</span>
+                    </button>
+                    <button class="settings-nav-item" type="button" data-tab="data-backup">
+                        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/>
+                            <polyline points="17 21 17 13 7 13 7 21"/>
+                            <polyline points="7 3 7 8 15 8"/>
+                        </svg>
+                        <span>Data &amp; backup</span>
+                    </button>
                 </nav>
 
                 <!-- ═══ Configuration ═══ -->
                 <section class="settings-panel" id="tab-configuration">
-                    <h2>Connection</h2>
+                    <h2>Backend Connection</h2>
                     <p class="settings-desc">
                         Point the app at your running Colab/Kaggle LLM server.
                     </p>
 
                     <div class="form-group">
-                        <label for="cfg-base-url">🌐 Colab Base URL</label>
+                        <label for="cfg-base-url">Backend Base URL</label>
                         <input type="url" id="cfg-base-url" placeholder="https://xxxx.trycloudflare.com"
-                            class="form-input">
-                        <span class="form-hint">URL Cloudflare dari output Google Colab notebook</span>
+                            class="form-input" autocomplete="off" spellcheck="false">
+                        <span class="form-hint">Cloudflare tunnel URL from your backend server</span>
                     </div>
+
                     <div class="form-group">
-                        <label for="cfg-api-key">🔑 API Key</label>
-                        <input type="text" id="cfg-api-key" placeholder="sk-colab-local" class="form-input">
+                        <label for="cfg-api-key">API Key</label>
+                        <div class="secret-input-row">
+                            <input type="password" id="cfg-api-key" placeholder="sk-colab-local" class="form-input" autocomplete="off" spellcheck="false">
+                            <button type="button" class="btn-secondary secret-toggle-btn" id="btn-toggle-api-key" aria-label="Reveal API key">Reveal</button>
+                        </div>
+                        <span class="form-hint">Must match the API key set in your backend server</span>
                     </div>
+
                     <div class="form-group">
-                        <label for="cfg-model">🤖 Model Name</label>
+                        <label for="cfg-model">Model Alias</label>
                         <select id="cfg-model" class="form-input">
                             <option value="character1">character1 (default)</option>
                         </select>
-                        <span class="form-hint">Nama model sesuai mapping di LiteLLM (semua akan diarahkan ke model
-                            Ollama di Colab)</span>
+                        <span class="form-hint">Model alias mapped in backend server</span>
                     </div>
+
                     <div class="form-actions">
-                        <button class="btn-secondary" id="btn-settings-test-connection">🔌 Test Connection</button>
-                        <button class="btn-primary" id="btn-settings-save">💾 Simpan</button>
+                        <button class="btn-secondary" id="btn-settings-test-connection" type="button">Test Connection</button>
+                        <button class="btn-primary" id="btn-settings-save" type="button">Save Configuration</button>
                     </div>
                     <div id="settings-connection-result" class="connection-result" style="display:none"></div>
                 </section>
@@ -76,12 +112,12 @@
                 <section class="settings-panel" id="tab-persona" hidden>
                     <div class="persona-panel-header">
                         <div>
-                            <h2>User Persona</h2>
+                            <h2>User Personas</h2>
                             <p class="settings-desc">
-                                Kelola profil persona kamu. Persona ini digunakan sebagai identitas kamu saat mengobrol dengan karakter AI.
+                                Manage the identities you use when conversing with characters or groups. Each character or group can remember a specific persona.
                             </p>
                         </div>
-                        <button class="btn-secondary" id="btn-create-persona" type="button">+ Tambah Persona</button>
+                        <button class="btn-secondary" id="btn-create-persona" type="button">+ New Persona</button>
                     </div>
 
                     <div class="persona-selector-cards" id="persona-list-cards">
@@ -90,167 +126,184 @@
 
                     <div class="persona-editor-card" id="persona-editor-card">
                         <div class="persona-editor-header" id="persona-editor-header" style="display:none">
+                            <span class="persona-badge" id="persona-badge-index">Persona #1</span>
                             <div style="flex:1"></div>
-                            <button class="btn-danger-outline" id="btn-delete-persona" type="button" style="display:none">🗑️ Hapus</button>
+                            <button class="btn-danger-outline" id="btn-delete-persona" type="button" style="display:none">Delete Persona</button>
                         </div>
 
                         <div class="form-row-avatar-name">
                             <div class="form-group persona-avatar-upload-group">
-                                <label>🎨 Avatar</label>
+                                <label>Avatar</label>
                                 <div class="avatar-upload-container" id="persona-avatar-upload-container">
                                     <input type="file" id="persona-avatar-file" accept="image/*" class="avatar-file-input">
                                     <div class="avatar-preview" id="persona-avatar-preview">
-                                        <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75">
                                             <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
                                             <polyline points="17 8 12 3 7 8"/>
                                             <line x1="12" y1="3" x2="12" y2="15"/>
                                         </svg>
                                         <span>Upload</span>
                                     </div>
-                                    <button type="button" class="avatar-remove-btn" id="persona-avatar-remove-btn" style="display:none" title="Hapus avatar">✕</button>
+                                    <button type="button" class="avatar-remove-btn" id="persona-avatar-remove-btn" style="display:none" title="Remove avatar">✕</button>
                                 </div>
                                 <input type="hidden" id="persona-avatar">
-                                <button type="button" class="avatar-pinterest-toggle" id="persona-pinterest-toggle" title="Cari dari Pinterest">🔎 Cari</button>
+                                <button type="button" class="avatar-pinterest-toggle" id="persona-pinterest-toggle" title="Search Pinterest">Search</button>
                             </div>
                             <div class="form-group flex-1">
-                                <label for="persona-name">📛 Nama (Name)</label>
-                                <input type="text" id="persona-name" placeholder="Nama atau panggilan..." class="form-input">
-                                <span class="form-hint">Dapat berupa huruf atau angka</span>
+                                <label for="persona-name">Name</label>
+                                <input type="text" id="persona-name" placeholder="Your name or alias..." class="form-input">
+                                <span class="form-hint">Used by characters to address you in conversation</span>
                             </div>
                         </div>
 
                         <div class="form-group pinterest-panel" id="persona-pinterest-panel" style="display:none">
-                            <label>🔎 Cari Avatar dari Pinterest</label>
+                            <label>Search Avatar via Pinterest</label>
                             <div class="pinterest-search-row">
-                                <input type="text" id="persona-pinterest-query" class="form-input" placeholder="Kata kunci pencarian avatar...">
-                                <button type="button" class="btn-secondary" id="persona-pinterest-search-btn">Cari</button>
+                                <input type="text" id="persona-pinterest-query" class="form-input" placeholder="Search keyword...">
+                                <button type="button" class="btn-secondary" id="persona-pinterest-search-btn">Search</button>
                             </div>
                             <div class="pinterest-results" id="persona-pinterest-results" style="display:none">
                                 <div class="pinterest-thumb-wrap">
                                     <img id="persona-pinterest-thumb" class="pinterest-thumb" alt="Preview">
                                 </div>
                                 <div class="pinterest-nav">
-                                    <button type="button" class="btn-icon" id="persona-pinterest-prev-btn" title="Sebelumnya">‹</button>
+                                    <button type="button" class="btn-icon" id="persona-pinterest-prev-btn" title="Previous">‹</button>
                                     <span class="pinterest-counter" id="persona-pinterest-counter">1 / 1</span>
-                                    <button type="button" class="btn-icon" id="persona-pinterest-next-btn" title="Selanjutnya">›</button>
+                                    <button type="button" class="btn-icon" id="persona-pinterest-next-btn" title="Next">›</button>
                                 </div>
-                                <button type="button" class="btn-primary pinterest-use-btn" id="persona-pinterest-use-btn">Gunakan Gambar Ini</button>
+                                <button type="button" class="btn-primary pinterest-use-btn" id="persona-pinterest-use-btn">Use This Image</button>
                             </div>
                             <span class="form-hint" id="persona-pinterest-status"></span>
                         </div>
 
                         <div class="form-row-2">
                             <div class="form-group">
-                                <label for="persona-age">🎂 Umur (Age)</label>
+                                <label for="persona-age">Age</label>
                                 <input type="number" id="persona-age" min="1" max="150" step="1" placeholder="20" class="form-input">
-                                <span class="form-hint">Hanya menerima angka</span>
+                                <span class="form-hint">Numeric age (optional)</span>
                             </div>
                             <div class="form-group">
-                                <label for="persona-gender">⚧️ Jenis Kelamin (Gender)</label>
+                                <label for="persona-gender">Gender</label>
                                 <select id="persona-gender" class="form-input">
                                     <option value="Male">Male</option>
                                     <option value="Female">Female</option>
                                     <option value="Non-binary">Non-binary</option>
                                 </select>
-                                <span class="form-hint">Pilih dari list</span>
+                                <span class="form-hint">Select gender identity</span>
                             </div>
                         </div>
 
                         <div class="form-row-2">
                             <div class="form-group">
-                                <label for="persona-height">📏 Tinggi Badan (cm)</label>
-                                <input type="number" id="persona-height" min="30" max="300" step="1" placeholder="180" class="form-input">
-                                <span class="form-hint">Hanya menerima angka (cm)</span>
+                                <label for="persona-height">Height (cm)</label>
+                                <input type="number" id="persona-height" min="30" max="300" step="1" placeholder="175" class="form-input">
+                                <span class="form-hint">Centimeters (optional)</span>
                             </div>
                             <div class="form-group">
-                                <label for="persona-weight">⚖️ Berat Badan (kg)</label>
-                                <input type="number" id="persona-weight" min="10" max="500" step="1" placeholder="60" class="form-input">
-                                <span class="form-hint">Hanya menerima angka (kg)</span>
+                                <label for="persona-weight">Weight (kg)</label>
+                                <input type="number" id="persona-weight" min="10" max="500" step="1" placeholder="65" class="form-input">
+                                <span class="form-hint">Kilograms (optional)</span>
                             </div>
                         </div>
 
                         <div class="persona-extra-section">
-                            <label class="form-sublabel">➕ Atribut Tambahan (Opsional)</label>
+                            <label class="form-sublabel">Additional Attributes (Optional)</label>
                             <div id="persona-extra-items" class="persona-extra-items"></div>
                             <div class="persona-extra-add-row">
                                 <select id="persona-extra-key-select" class="form-input" style="width:160px">
-                                    <option value="Pekerjaan">Pekerjaan</option>
-                                    <option value="Hobi">Hobi</option>
+                                    <option value="Pekerjaan">Occupation</option>
+                                    <option value="Hobi">Hobby</option>
                                     <option value="Status">Status</option>
-                                    <option value="Kepribadian">Kepribadian</option>
-                                    <option value="custom">Lainnya...</option>
+                                    <option value="Kepribadian">Personality</option>
+                                    <option value="custom">Custom...</option>
                                 </select>
-                                <input type="text" id="persona-extra-custom-key" placeholder="Key kustom..." class="form-input" style="width:130px; display:none">
-                                <input type="text" id="persona-extra-val" placeholder="Nilai atribut..." class="form-input">
-                                <button class="btn-secondary" id="btn-add-extra-attr" type="button">+ Tambah</button>
+                                <input type="text" id="persona-extra-custom-key" placeholder="Attribute name..." class="form-input" style="width:130px; display:none">
+                                <input type="text" id="persona-extra-val" placeholder="Attribute value..." class="form-input">
+                                <button class="btn-secondary" id="btn-add-extra-attr" type="button">+ Add</button>
                             </div>
                         </div>
 
                         <div class="settings-actions">
-                            <button class="btn-primary" id="btn-save-persona" type="button">💾 Simpan Persona</button>
-                            <span class="save-indicator" id="persona-save-indicator"><span class="dot"></span> Tersimpan</span>
+                            <button class="btn-primary" id="btn-save-persona" type="button">Save Persona</button>
+                            <span class="save-indicator" id="persona-save-indicator"><span class="dot"></span> Saved</span>
                         </div>
                     </div>
                 </section>
 
                 <!-- ═══ Appearance ═══ -->
                 <section class="settings-panel" id="tab-appearance" hidden>
-                    <h2>Color palette</h2>
+                    <h2>Appearance &amp; Theme</h2>
                     <p class="settings-desc">
-                        Pick a primary (accent) color and a background color — every panel, bubble,
-                        and button in the app updates instantly and is remembered on this browser.
+                        Calm, low-glare surfaces designed for long reading sessions. System mode is the default; switch modes or customize the surface and accent colors below.
                     </p>
+
+                    <div class="theme-mode-section">
+                        <span class="presets-label">Theme:</span>
+                        <div class="theme-mode-bar" id="theme-mode-group" role="group" aria-label="Theme mode">
+                            <button type="button" class="theme-mode-btn active" data-mode="system">System</button>
+                            <button type="button" class="theme-mode-btn" data-mode="dark">Dark</button>
+                            <button type="button" class="theme-mode-btn" data-mode="light">Light</button>
+                        </div>
+                    </div>
+
+                    <div class="theme-mode-section">
+                        <span class="presets-label">Font size:</span>
+                        <div class="theme-mode-bar" id="font-size-group" role="group" aria-label="Chat font size">
+                            <button type="button" class="font-size-btn" data-size="small">Small</button>
+                            <button type="button" class="font-size-btn active" data-size="medium">Medium</button>
+                            <button type="button" class="font-size-btn" data-size="large">Large</button>
+                        </div>
+                    </div>
 
                     <div class="picker-row">
                         <div class="picker-card">
                             <input type="color" id="accent-picker" aria-label="Primary accent color">
                             <div>
-                                <label for="accent-picker">Primary / accent</label>
-                                <div class="picker-value" id="accent-value">#A855F7</div>
+                                <label for="accent-picker">Primary accent</label>
+                                <div class="picker-value" id="accent-value">#5E9E8B</div>
                             </div>
                         </div>
                         <div class="picker-card">
                             <input type="color" id="bg-picker" aria-label="Background color">
                             <div>
-                                <label for="bg-picker">Background</label>
-                                <div class="picker-value" id="bg-value">#121212</div>
+                                <label for="bg-picker">Base surface</label>
+                                <div class="picker-value" id="bg-value">#0E1013</div>
                             </div>
                         </div>
                     </div>
 
                     <div class="presets-row">
-                        <span class="presets-label">Quick presets:</span>
-                        <button class="preset-swatch" style="background:linear-gradient(135deg,#A855F7,#121212)"
-                            data-accent="#A855F7" data-bg="#121212" aria-label="Default violet"></button>
-                        <button class="preset-swatch" style="background:linear-gradient(135deg,#22C55E,#0B1712)"
-                            data-accent="#22C55E" data-bg="#0B1712" aria-label="Emerald"></button>
-                        <button class="preset-swatch" style="background:linear-gradient(135deg,#F97316,#1A1210)"
-                            data-accent="#F97316" data-bg="#1A1210" aria-label="Amber"></button>
-                        <button class="preset-swatch" style="background:linear-gradient(135deg,#0EA5E9,#0B1420)"
-                            data-accent="#0EA5E9" data-bg="#0B1420" aria-label="Sky"></button>
-                        <button class="preset-swatch" style="background:linear-gradient(135deg,#EC4899,#160B12)"
-                            data-accent="#EC4899" data-bg="#160B12" aria-label="Pink"></button>
-                        <button class="preset-swatch" style="background:linear-gradient(135deg,#6366F1,#F5F5F7)"
-                            data-accent="#6366F1" data-bg="#F5F5F7" aria-label="Light mode"></button>
+                        <span class="presets-label">Curated palettes:</span>
+                        <button class="preset-swatch" style="background:linear-gradient(135deg,#5E9E8B 50%,#0E1013 50%)"
+                            data-accent="#5E9E8B" data-bg="#0E1013" aria-label="Obsidian &amp; Verdigris (Default)" title="Obsidian &amp; Verdigris (Default)"></button>
+                        <button class="preset-swatch" style="background:linear-gradient(135deg,#6488A8 50%,#0F1318 50%)"
+                            data-accent="#6488A8" data-bg="#0F1318" aria-label="Slate &amp; Nord Blue" title="Slate &amp; Nord Blue"></button>
+                        <button class="preset-swatch" style="background:linear-gradient(135deg,#C88A4B 50%,#141210 50%)"
+                            data-accent="#C88A4B" data-bg="#141210" aria-label="Warm Peat &amp; Amber" title="Warm Peat &amp; Amber"></button>
+                        <button class="preset-swatch" style="background:linear-gradient(135deg,#689D6A 50%,#101412 50%)"
+                            data-accent="#689D6A" data-bg="#101412" aria-label="Deep Forest &amp; Moss" title="Deep Forest &amp; Moss"></button>
+                        <button class="preset-swatch" style="background:linear-gradient(135deg,#B86B77 50%,#141012 50%)"
+                            data-accent="#B86B77" data-bg="#141012" aria-label="Crimson Ink &amp; Rose" title="Crimson Ink &amp; Rose"></button>
+                        <button class="preset-swatch" style="background:linear-gradient(135deg,#2F6F5E 50%,#F6F7F8 50%)"
+                            data-accent="#2F6F5E" data-bg="#F6F7F8" aria-label="Alabaster &amp; Deep Pine (Light)" title="Alabaster &amp; Deep Pine (Light)"></button>
                     </div>
 
                     <div class="settings-actions">
-                        <button class="btn-primary" id="btn-apply-theme">Apply &amp; save</button>
-                        <button class="btn-secondary" id="btn-reset-theme">Reset to default</button>
-                        <span class="save-indicator" id="save-indicator"><span class="dot"></span> Saved to this
-                            browser</span>
+                        <button class="btn-primary" id="btn-apply-theme" type="button">Apply &amp; Save</button>
+                        <button class="btn-secondary" id="btn-reset-theme" type="button">Reset to Default</button>
+                        <span class="save-indicator" id="save-indicator"><span class="dot"></span> Saved to this browser</span>
                     </div>
 
                     <div class="preview-label">Live preview</div>
                     <div class="preview-box">
                         <div class="preview-messages">
-                            <div class="preview-bubble assistant">Hey! This is how assistant replies will look.</div>
-                            <div class="preview-bubble user">And this is your message bubble ✨</div>
+                            <div class="preview-bubble assistant">The rain outside has settled into a quiet mist. Tell me what you would like to explore next.</div>
+                            <div class="preview-bubble user">Let's review the notes from our last chapter.</div>
                         </div>
                         <div class="preview-controls">
                             <button class="btn-primary" type="button">Send</button>
                             <button class="btn-secondary" type="button">Regenerate</button>
-                            <span class="preview-chip">● Online</span>
+                            <span class="preview-chip">● Connected</span>
                         </div>
                     </div>
                 </section>
