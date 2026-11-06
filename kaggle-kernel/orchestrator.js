@@ -75,10 +75,31 @@ function logInfo(msg) {
 }
 
 /**
+ * Build isolated environment variables for Python `kaggle` CLI / `KaggleApi`
+ * so the selected `kaggle.json` (Priority #1: `kaggle-kernel/config/kaggle.json`,
+ * Priority #2: `~/.kaggle/kaggle.json`) never conflicts with the other account.
+ */
+function buildKagglePythonEnv(creds) {
+    const env = {
+        ...process.env,
+        KAGGLE_CONFIG_DIR: path.dirname(creds.sourcePath),
+        KAGGLE_USERNAME: creds.username,
+        KAGGLE_KEY: creds.key,
+        PYTHONIOENCODING: 'utf-8'
+    };
+    if (creds.key.startsWith('KGAT_')) {
+        env.KAGGLE_API_TOKEN = creds.key;
+    } else {
+        delete env.KAGGLE_API_TOKEN;
+    }
+    return env;
+}
+
+/**
  * Locate Python executable that has the `kaggle` package installed (optional helper,
  * falls back to pure Node.js REST API calls if Python/kaggle is not installed).
  */
-function findPythonWithKaggle() {
+function findPythonWithKaggle(creds) {
     const userHome = os.homedir();
     const candidates = [
         path.join(userHome, 'AppData', 'Local', 'Programs', 'Python', 'Python314', 'python.exe'),
@@ -89,13 +110,15 @@ function findPythonWithKaggle() {
         'python'
     ];
 
+    const pyEnv = creds ? buildKagglePythonEnv(creds) : { ...process.env, PYTHONIOENCODING: 'utf-8' };
+
     for (const cmd of candidates) {
         try {
             if (cmd.includes(path.sep) && !fs.existsSync(cmd)) continue;
             const res = spawnSync(cmd, ['-c', 'import kaggle; print("OK")'], {
                 encoding: 'utf8',
                 timeout: 8000,
-                env: { ...process.env, PYTHONIOENCODING: 'utf-8' }
+                env: pyEnv
             });
             if (res.status === 0 && (res.stdout || '').includes('OK')) {
                 return cmd;
@@ -108,15 +131,21 @@ function findPythonWithKaggle() {
 }
 
 /**
- * Load Kaggle credentials from `kaggle-kernel/config/kaggle.json`
- * (or fallback to `~/.kaggle/kaggle.json`).
+ * Load Kaggle credentials with strict priority:
+ *  - Priority #1: `kaggle-kernel/config/kaggle.json` (project config — e.g. 2nd account)
+ *  - Priority #2: `~/.kaggle/kaggle.json` (system userdata fallback — e.g. main account)
  */
 function loadCredentials() {
     const primaryPath = path.join(CONFIG_DIR, 'kaggle.json');
     const fallbackPath = path.join(os.homedir(), '.kaggle', 'kaggle.json');
 
-    const candidatePaths = [primaryPath, fallbackPath];
-    for (const p of candidatePaths) {
+    const candidateSources = [
+        { filePath: primaryPath, priorityLabel: 'Prioritas #1 (kaggle-kernel/config/kaggle.json)' },
+        { filePath: fallbackPath, priorityLabel: 'Prioritas #2 Fallback (~/.kaggle/kaggle.json)' }
+    ];
+
+    for (const src of candidateSources) {
+        const p = src.filePath;
         if (!fs.existsSync(p)) continue;
         try {
             const raw = fs.readFileSync(p, 'utf8');
@@ -129,7 +158,7 @@ function loadCredentials() {
                 username !== 'ISI_USERNAME_KAGGLE_KAMU' &&
                 key !== 'ISI_API_KEY_KAGGLE_KAMU'
             ) {
-                return { username, key, sourcePath: p };
+                return { username, key, sourcePath: p, priorityLabel: src.priorityLabel };
             }
         } catch (err) {
             throw new Error(`File kredensial Kaggle tidak valid (${p}): ${err.message}`);
@@ -137,9 +166,9 @@ function loadCredentials() {
     }
 
     throw new Error(
-        `Kredensial Kaggle belum ditemukan atau belum diisi!\n` +
-        `    1. Buka https://www.kaggle.com/settings -> bagian API -> Create New Token\n` +
-        `    2. Simpan file 'kaggle.json' ke: ${primaryPath}\n` +
+        `Kredensial Kaggle belum ditemukan atau masih berisi template placeholder!\n` +
+        `    1. Prioritas #1: Isi kredensial di ${primaryPath}\n` +
+        `    2. Prioritas #2 (Fallback): Atau simpan di ${fallbackPath}\n` +
         `    3. Lihat panduan lengkap di: ${path.join(CONFIG_DIR, 'README.md')}`
     );
 }
@@ -220,12 +249,7 @@ async function pushKernelToKaggle(creds, staged, pyExe) {
         const res = spawnSync(pyExe, ['-c', pyCode], {
             encoding: 'utf8',
             timeout: 60000,
-            env: {
-                ...process.env,
-                KAGGLE_USERNAME: creds.username,
-                KAGGLE_KEY: creds.key,
-                PYTHONIOENCODING: 'utf-8'
-            }
+            env: buildKagglePythonEnv(creds)
         });
 
         if (res.status === 0) {
@@ -306,12 +330,7 @@ async function getKernelStatus(creds, pyExe) {
         const res = spawnSync(pyExe, ['-c', pyCode], {
             encoding: 'utf8',
             timeout: 20000,
-            env: {
-                ...process.env,
-                KAGGLE_USERNAME: creds.username,
-                KAGGLE_KEY: creds.key,
-                PYTHONIOENCODING: 'utf-8'
-            }
+            env: buildKagglePythonEnv(creds)
         });
         if (res.status === 0) {
             const lines = (res.stdout || '').trim().split(/\r?\n/);
@@ -359,12 +378,7 @@ async function fetchTunnelStateFromDataset(creds, pyExe) {
         const res = spawnSync(pyExe, ['-c', pyCode], {
             encoding: 'utf8',
             timeout: 25000,
-            env: {
-                ...process.env,
-                KAGGLE_USERNAME: creds.username,
-                KAGGLE_KEY: creds.key,
-                PYTHONIOENCODING: 'utf-8'
-            }
+            env: buildKagglePythonEnv(creds)
         });
 
         if (res.status === 0 && fs.existsSync(localFile)) {
@@ -527,14 +541,15 @@ async function startBetaKaggleOrchestrator(projectRoot) {
 
     try {
         // 1. Validate credentials
-        logStep(1, 4, 'Memeriksa kredensial di kaggle-kernel/config/kaggle.json...');
+        logStep(1, 4, 'Memeriksa kredensial Kaggle (Prioritas #1: config/kaggle.json -> Prioritas #2: ~/.kaggle/kaggle.json)...');
         const creds = loadCredentials();
-        const pyExe = findPythonWithKaggle();
+        const pyExe = findPythonWithKaggle(creds);
         orchestratorState.username = creds.username;
         orchestratorState.kernelRef = `${creds.username}/${KERNEL_SLUG}`;
         orchestratorState.datasetRef = `${creds.username}/${TUNNEL_DATASET_SLUG}`;
         logInfo(`Username Kaggle : ${creds.username}`);
-        logInfo(`Sumber Kredensial: ${creds.sourcePath}`);
+        logInfo(`Prioritas Aktif : ${creds.priorityLabel}`);
+        logInfo(`File Kredensial : ${creds.sourcePath}`);
         logInfo(`Engine API      : ${pyExe ? `Python KaggleApi (${pyExe})` : 'Node.js Direct REST API'}`);
 
         // 2. Stage kernel with unique RUN_ID

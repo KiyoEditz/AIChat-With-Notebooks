@@ -43,4 +43,5 @@ Build-Molab-CUDA-Release.py
 
 # Kaggle Kernel Beta credentials & staging
 kaggle-kernel/config/kaggle.json
+kaggle-kernel/config/1kaggle.json
 kaggle-kernel/.staging/
