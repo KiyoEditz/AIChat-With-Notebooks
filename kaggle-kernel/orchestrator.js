@@ -56,7 +56,7 @@ let orchestratorState = {
 function logBox(title, lines = []) {
     const bar = '═'.repeat(62);
     console.log(`\n╔${bar}╗`);
-    console.log(`║  ${title.padEnd(60)}║`);
+    console.log(`║  ${title.padEnd(59)}║`);
     if (lines.length > 0) {
         console.log(`╠${bar}╣`);
         for (const l of lines) {
@@ -534,7 +534,7 @@ async function startBetaKaggleOrchestrator(projectRoot) {
     orchestratorState.startedAt = Date.now();
     registerShutdownHooks();
 
-    logBox('🚀 BETA-KAGGLE AUTO-SERVER ORCHESTRATOR', [
+    logBox('🚀 BETA-KAGGLE AUTO-SERVER ORCHESTRATOR ', [
         'Mode     : Automated Kaggle GPU Kernel + Auto-Tunnel',
         'Watchdog : 30 Menit Auto-Idle + Shutdown saat Ctrl+C'
     ]);
@@ -569,7 +569,7 @@ async function startBetaKaggleOrchestrator(projectRoot) {
         logInfo('Proses unduh model (~27 GB) ke VRAM T4 x2 biasanya memakan waktu 3–7 menit.');
         logInfo('Server lokal AIChat sudah aktif — URL akan otomatis disambungkan begitu siap.');
 
-        const timeoutMs = 25 * 60 * 1000; // 25 minutes max wait for startup
+        const timeoutMs = 30 * 60 * 1000; // 30 minutes max wait for startup (includes Kaggle GPU queue time)
         const pollStart = Date.now();
         let lastPrintedStatus = '';
 
@@ -621,7 +621,7 @@ async function startBetaKaggleOrchestrator(projectRoot) {
         }
 
         if (!orchestratorState.abortPolling) {
-            throw new Error('Waktu tunggu (25 menit) habis saat menunggu URL Cloudflare dari Kaggle.');
+            throw new Error('Waktu tunggu (30 menit) habis saat menunggu URL Cloudflare dari Kaggle.');
         }
     } catch (err) {
         orchestratorState.phase = 'error';

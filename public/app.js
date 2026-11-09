@@ -389,6 +389,7 @@ async function selectCharacter(id) {
     state.chats = Array.isArray(chats) ? chats : [];
     if (memory && !memory.error) {
         state.memory = memory;
+        applyPersonaSlotToState(state.memory.personaId);
     }
     renderChatList();
 
@@ -669,10 +670,11 @@ async function selectGroup(groupId, preserveChatId = null) {
 
         state.memory = (groupMem && !groupMem.error)
             ? groupMem
-            : { facts: [], summaries: [], importantEvents: [], personaId: group.activePersonaId || null };
+            : { facts: [], summaries: [], importantEvents: [], personaId: group.activePersonaId || '1', personaMemories: {} };
         if (group.activePersonaId) {
-            state.memory.personaId = group.activePersonaId;
+            state.memory.personaId = String(group.activePersonaId);
         }
+        applyPersonaSlotToState(state.memory.personaId);
 
         // Update local group cache
         const idx = state.groups.findIndex(g => g.id === groupId);
@@ -2626,8 +2628,64 @@ window.deleteMessage = async function (index, messageId) {
 };
 
 // ══════════════════════════════════════════════════════════
-//  MEMORY
+//  MEMORY (Sticky Memory per Persona)
 // ══════════════════════════════════════════════════════════
+
+function ensureClientPersonaMemories(mem) {
+    if (!mem || typeof mem !== 'object') return;
+    const activePid = String(mem.personaId || (state.personas && state.personas[0]?.id) || '1');
+    mem.personaId = activePid;
+    if (!mem.personaMemories || typeof mem.personaMemories !== 'object' || Array.isArray(mem.personaMemories)) {
+        mem.personaMemories = {
+            [activePid]: {
+                facts: Array.isArray(mem.facts) ? [...mem.facts] : [],
+                summaries: Array.isArray(mem.summaries) ? [...mem.summaries] : [],
+                importantEvents: Array.isArray(mem.importantEvents) ? mem.importantEvents.map(e => ({ ...e })) : []
+            }
+        };
+    } else if (!mem.personaMemories[activePid]) {
+        mem.personaMemories[activePid] = {
+            facts: [],
+            summaries: [],
+            importantEvents: []
+        };
+    }
+}
+
+function syncCurrentPersonaSlotInState(targetPersonaId = null) {
+    if (!state.memory || typeof state.memory !== 'object') return;
+    ensureClientPersonaMemories(state.memory);
+    const pid = String(targetPersonaId || state.memoryModalDraftPersonaId || state.memory.personaId || '1');
+    state.memory.personaMemories[pid] = {
+        facts: Array.isArray(state.memory.facts) ? [...state.memory.facts] : [],
+        summaries: Array.isArray(state.memory.summaries) ? [...state.memory.summaries] : [],
+        importantEvents: Array.isArray(state.memory.importantEvents)
+            ? state.memory.importantEvents.filter(e => e && typeof e === 'object').map(e => ({ ...e }))
+            : [],
+        lastUpdated: new Date().toISOString()
+    };
+}
+
+function applyPersonaSlotToState(personaId) {
+    if (!state.memory || typeof state.memory !== 'object') return;
+    ensureClientPersonaMemories(state.memory);
+    const pid = String(personaId || state.memory.personaId || (state.personas && state.personas[0]?.id) || '1');
+    state.memory.personaId = pid;
+    state.memoryModalDraftPersonaId = pid;
+    if (!state.memory.personaMemories[pid]) {
+        state.memory.personaMemories[pid] = {
+            facts: [],
+            summaries: [],
+            importantEvents: []
+        };
+    }
+    const slot = state.memory.personaMemories[pid];
+    state.memory.facts = Array.isArray(slot.facts) ? [...slot.facts] : [];
+    state.memory.summaries = Array.isArray(slot.summaries) ? [...slot.summaries] : [];
+    state.memory.importantEvents = Array.isArray(slot.importantEvents)
+        ? slot.importantEvents.filter(e => e && typeof e === 'object').map(e => ({ ...e }))
+        : [];
+}
 
 async function openMemoryViewer() {
     if (!state.currentCharacterId && !state.currentGroupId) return;
@@ -2646,13 +2704,15 @@ async function openMemoryViewer() {
         if (Array.isArray(personas)) {
             state.personas = personas;
         }
-        state.memory = memory || { facts: [], summaries: [], importantEvents: [], personaId: null };
+        state.memory = (memory && !memory.error)
+            ? memory
+            : { facts: [], summaries: [], importantEvents: [], personaId: null, personaMemories: {} };
         if (group && group.activePersonaId) {
-            state.memory.personaId = group.activePersonaId;
+            state.memory.personaId = String(group.activePersonaId);
         } else if (!state.memory.personaId && state.personas.length > 0) {
-            state.memory.personaId = state.personas[0].id;
+            state.memory.personaId = String(state.personas[0].id);
         }
-        state.memoryModalDraftPersonaId = state.memory.personaId;
+        applyPersonaSlotToState(state.memory.personaId);
         renderMemory();
         openModal('modal-memory');
         closeSidebarOnMobile();
@@ -2674,11 +2734,13 @@ async function openMemoryViewer() {
     if (Array.isArray(personas)) {
         state.personas = personas;
     }
-    state.memory = memory;
+    state.memory = (memory && !memory.error)
+        ? memory
+        : { facts: [], summaries: [], importantEvents: [], personaId: null, personaMemories: {} };
     if (!state.memory.personaId && state.personas.length > 0) {
-        state.memory.personaId = state.personas[0].id;
+        state.memory.personaId = String(state.personas[0].id);
     }
-    state.memoryModalDraftPersonaId = state.memory.personaId;
+    applyPersonaSlotToState(state.memory.personaId);
     renderMemory();
     openModal('modal-memory');
     closeSidebarOnMobile();
@@ -2779,23 +2841,39 @@ function renderPersonaSelector() {
 }
 
 async function selectMemoryPersona(personaId) {
-    state.memoryModalDraftPersonaId = personaId;
+    const nextPid = String(personaId);
     if (!state.memory) {
-        state.memory = { facts: [], summaries: [], importantEvents: [], personaId };
-    } else {
-        state.memory.personaId = personaId;
+        state.memory = { facts: [], summaries: [], importantEvents: [], personaId: nextPid, personaMemories: {} };
     }
-    renderPersonaSelector();
 
+    // 1. Save current persona's draft items into its sticky slot before switching
+    const prevPid = String(state.memoryModalDraftPersonaId || state.memory.personaId || '1');
+    syncCurrentPersonaSlotInState(prevPid);
+
+    // 2. Clear any unsubmitted text in the input boxes so it doesn't bleed visually
+    const factInput = $('#memory-new-fact');
+    const eventInput = $('#memory-new-event');
+    if (factInput) factInput.value = '';
+    if (eventInput) eventInput.value = '';
+
+    // 3. Switch state.memory to the newly selected persona's sticky slot & refresh entire Memory UI immediately
+    applyPersonaSlotToState(nextPid);
+    renderMemory();
+
+    // 4. Persist persona switch and sticky slots to backend
     if (state.currentGroupId) {
         const requestGroupId = state.currentGroupId;
         const group = state.groups.find(g => g.id === requestGroupId);
         if (group) {
-            group.activePersonaId = personaId;
+            group.activePersonaId = nextPid;
         }
         const [grpRes, memRes] = await Promise.all([
-            api('PUT', `/api/groups/${requestGroupId}`, { activePersonaId: personaId }),
-            api('PUT', `/api/groups/${requestGroupId}/memory`, { ...state.memory, personaId })
+            api('PUT', `/api/groups/${requestGroupId}`, { activePersonaId: nextPid }),
+            api('PUT', `/api/groups/${requestGroupId}/memory`, {
+                personaId: nextPid,
+                switchPersonaOnly: true,
+                personaMemories: state.memory.personaMemories
+            })
         ]);
         if ((grpRes && grpRes.error) || (memRes && memRes.error)) {
             toast((grpRes && grpRes.error) || (memRes && memRes.error), 'error');
@@ -2806,7 +2884,11 @@ async function selectMemoryPersona(personaId) {
         }
     } else if (state.currentCharacterId) {
         const requestCharacterId = state.currentCharacterId;
-        const res = await api('PUT', `/api/memory/${requestCharacterId}`, { ...state.memory, personaId });
+        const res = await api('PUT', `/api/memory/${requestCharacterId}`, {
+            personaId: nextPid,
+            switchPersonaOnly: true,
+            personaMemories: state.memory.personaMemories
+        });
         if (res && res.error) {
             toast(res.error, 'error');
             return;
@@ -2819,8 +2901,9 @@ async function selectMemoryPersona(personaId) {
 window.selectMemoryPersona = selectMemoryPersona;
 
 function removeMemoryItem(key, index) {
-    if (!state.memory) return;
+    if (!state.memory || !Array.isArray(state.memory[key])) return;
     state.memory[key].splice(index, 1);
+    syncCurrentPersonaSlotInState();
     renderMemory();
 }
 
@@ -2830,6 +2913,7 @@ function addMemoryFact() {
     if (!val || !state.memory) return;
     state.memory.facts = state.memory.facts || [];
     state.memory.facts.push(val);
+    syncCurrentPersonaSlotInState();
     input.value = '';
     renderMemory();
 }
@@ -2843,6 +2927,7 @@ function addMemoryEvent() {
         description: val,
         date: new Date().toISOString().split('T')[0]
     });
+    syncCurrentPersonaSlotInState();
     input.value = '';
     renderMemory();
 }
@@ -2853,8 +2938,9 @@ async function saveMemory() {
         const requestGroupId = state.currentGroupId;
 
         if (state.memoryModalDraftPersonaId) {
-            state.memory.personaId = state.memoryModalDraftPersonaId;
+            state.memory.personaId = String(state.memoryModalDraftPersonaId);
         }
+        syncCurrentPersonaSlotInState(state.memory.personaId);
 
         const res = await api('PUT', `/api/groups/${requestGroupId}/memory`, state.memory);
         if (!res || res.error) {
@@ -2862,6 +2948,7 @@ async function saveMemory() {
             return;
         }
         if (state.currentGroupId !== requestGroupId) return;
+        state.memory = res;
         const group = state.groups.find(g => g.id === requestGroupId);
         if (group && state.memory.personaId) {
             group.activePersonaId = state.memory.personaId;
@@ -2884,8 +2971,9 @@ async function saveMemory() {
     const requestCharacterId = state.currentCharacterId; // capture before the await
 
     if (state.memoryModalDraftPersonaId) {
-        state.memory.personaId = state.memoryModalDraftPersonaId;
+        state.memory.personaId = String(state.memoryModalDraftPersonaId);
     }
+    syncCurrentPersonaSlotInState(state.memory.personaId);
 
     const res = await api('PUT', `/api/memory/${requestCharacterId}`, state.memory);
     if (!res || res.error) {
@@ -2893,6 +2981,7 @@ async function saveMemory() {
         return;
     }
     if (state.currentCharacterId !== requestCharacterId) return;
+    state.memory = res;
 
     if (state.currentChatId) {
         const freshChat = await api('GET', `/api/chat/${state.currentChatId}`);
@@ -2924,8 +3013,9 @@ async function summarizeMemory() {
         try {
             if (state.memory) {
                 if (state.memoryModalDraftPersonaId) {
-                    state.memory.personaId = state.memoryModalDraftPersonaId;
+                    state.memory.personaId = String(state.memoryModalDraftPersonaId);
                 }
+                syncCurrentPersonaSlotInState(state.memory.personaId);
                 const saveRes = await api('PUT', `/api/groups/${requestGroupId}/memory`, state.memory);
                 if (saveRes && saveRes.error) {
                     toast(saveRes.error, 'error');
@@ -2933,9 +3023,11 @@ async function summarizeMemory() {
                 }
             }
 
+            const activePid = String(state.memoryModalDraftPersonaId || state.memory?.personaId || '1');
             const result = await api('POST', `/api/memory/${requestGroupId}/summarize`, {
                 chatId: state.currentGroupChatId,
-                isGroup: true
+                isGroup: true,
+                personaId: activePid
             });
             if (state.currentGroupId !== requestGroupId) return;
 
@@ -2943,6 +3035,7 @@ async function summarizeMemory() {
                 toast(result.error, 'error');
             } else {
                 state.memory = result.memory;
+                applyPersonaSlotToState(state.memoryModalDraftPersonaId || state.memory.personaId);
                 renderMemory();
                 if (result.warning) {
                     toast(result.warning, 'warning');
@@ -2974,8 +3067,9 @@ async function summarizeMemory() {
     try {
         if (state.memory) {
             if (state.memoryModalDraftPersonaId) {
-                state.memory.personaId = state.memoryModalDraftPersonaId;
+                state.memory.personaId = String(state.memoryModalDraftPersonaId);
             }
+            syncCurrentPersonaSlotInState(state.memory.personaId);
             const saveRes = await api('PUT', `/api/memory/${requestCharacterId}`, state.memory);
             if (saveRes && saveRes.error) {
                 toast(saveRes.error, 'error');
@@ -2983,8 +3077,10 @@ async function summarizeMemory() {
             }
         }
 
+        const activePid = String(state.memoryModalDraftPersonaId || state.memory?.personaId || '1');
         const result = await api('POST', `/api/memory/${requestCharacterId}/summarize`, {
-            chatId: state.currentChatId
+            chatId: state.currentChatId,
+            personaId: activePid
         });
 
         // The LLM call above can take anywhere from 5 to 120 seconds. If
@@ -2998,6 +3094,7 @@ async function summarizeMemory() {
             toast(result.error, 'error');
         } else {
             state.memory = result.memory;
+            applyPersonaSlotToState(state.memoryModalDraftPersonaId || state.memory.personaId);
             renderMemory();
             if (result.warning) {
                 toast(result.warning, 'warning');

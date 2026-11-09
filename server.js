@@ -313,14 +313,14 @@ app.post('/api/characters', (req, res) => {
     writeJSON(path.join(CHARACTERS_DIR, `${id}.json`), char);
 
     // Initialize memory for this character
-    writeJSON(path.join(PRIVATE_MEMORY_DIR, `${id}.json`), {
+    writeJSON(path.join(PRIVATE_MEMORY_DIR, `${id}.json`), normalizeMemoryDoc({
         characterId: id,
         facts: [],
         summaries: [],
         importantEvents: [],
-        userPreferences: {},
+        personaId: '1',
         lastUpdated: now
-    });
+    }, 'characterId', id, '1'));
 
     res.json(char);
 });
@@ -583,14 +583,15 @@ app.post('/api/groups', (req, res) => {
 
     // Also initialize group memory in GROUP_MEMORY_DIR
     const memFp = path.join(GROUP_MEMORY_DIR, `${id}.json`);
-    writeJSON(memFp, {
+    const initGroupPersonaId = String(activePersonaId || '1');
+    writeJSON(memFp, normalizeMemoryDoc({
         groupId: id,
         facts: [],
         summaries: [],
         importantEvents: [],
-        personaId: activePersonaId || '1',
+        personaId: initGroupPersonaId,
         lastUpdated: now
-    });
+    }, 'groupId', id, initGroupPersonaId));
 
     res.json(group);
 });
@@ -1152,23 +1153,50 @@ app.delete('/api/personas/:id', (req, res) => {
     }
     fs.unlinkSync(fp);
 
+    const remainingPersonas = getPersonas();
+    const fallbackPersonaId = (remainingPersonas[0] && String(remainingPersonas[0].id)) || '1';
+
     // Clean up dangling references to the deleted persona in memory and group files
     try {
         const privMemFiles = fs.readdirSync(PRIVATE_MEMORY_DIR).filter(f => f.endsWith('.json'));
         for (const f of privMemFiles) {
             const mFp = path.join(PRIVATE_MEMORY_DIR, f);
-            const mem = readJSON(mFp);
-            if (mem && String(mem.personaId) === deletedId) {
-                mem.personaId = null;
+            const rawMem = readJSON(mFp);
+            if (!rawMem) continue;
+            const charId = rawMem.characterId || f.replace(/\.json$/, '');
+            let mem = normalizeMemoryDoc(rawMem, 'characterId', charId, fallbackPersonaId);
+            let modified = false;
+            if (mem.personaMemories && mem.personaMemories[deletedId]) {
+                delete mem.personaMemories[deletedId];
+                modified = true;
+            }
+            if (String(mem.personaId) === deletedId || !mem.personaId) {
+                mem.personaId = fallbackPersonaId;
+                modified = true;
+            }
+            if (modified) {
+                mem = normalizeMemoryDoc(mem, 'characterId', charId, fallbackPersonaId);
                 writeJSON(mFp, mem);
             }
         }
         const grpMemFiles = fs.readdirSync(GROUP_MEMORY_DIR).filter(f => f.endsWith('.json'));
         for (const f of grpMemFiles) {
             const gmFp = path.join(GROUP_MEMORY_DIR, f);
-            const gMem = readJSON(gmFp);
-            if (gMem && String(gMem.personaId) === deletedId) {
-                gMem.personaId = null;
+            const rawGMem = readJSON(gmFp);
+            if (!rawGMem) continue;
+            const grpId = rawGMem.groupId || f.replace(/\.json$/, '');
+            let gMem = normalizeMemoryDoc(rawGMem, 'groupId', grpId, fallbackPersonaId);
+            let modified = false;
+            if (gMem.personaMemories && gMem.personaMemories[deletedId]) {
+                delete gMem.personaMemories[deletedId];
+                modified = true;
+            }
+            if (String(gMem.personaId) === deletedId || !gMem.personaId) {
+                gMem.personaId = fallbackPersonaId;
+                modified = true;
+            }
+            if (modified) {
+                gMem = normalizeMemoryDoc(gMem, 'groupId', grpId, fallbackPersonaId);
                 writeJSON(gmFp, gMem);
             }
         }
@@ -1177,7 +1205,7 @@ app.delete('/api/personas/:id', (req, res) => {
             const gFp = path.join(GROUP_CHATS_DIR, f);
             const grp = readJSON(gFp);
             if (grp && String(grp.activePersonaId) === deletedId) {
-                grp.activePersonaId = null;
+                grp.activePersonaId = fallbackPersonaId;
                 writeJSON(gFp, grp);
             }
         }
@@ -1189,13 +1217,127 @@ app.delete('/api/personas/:id', (req, res) => {
 });
 
 // ══════════════════════════════════════════════════════════════
-//  MEMORY API — Persistent memory for each character
+//  MEMORY API — Persistent Sticky Memory (Persona-bound)
 // ══════════════════════════════════════════════════════════════
+
+function sanitizeMemorySlot(slot = {}) {
+    return {
+        facts: Array.isArray(slot.facts)
+            ? slot.facts.filter(f => typeof f === 'string' && f.trim()).map(f => f.trim())
+            : [],
+        summaries: Array.isArray(slot.summaries)
+            ? slot.summaries.filter(s => typeof s === 'string' && s.trim()).map(s => s.trim())
+            : [],
+        importantEvents: Array.isArray(slot.importantEvents)
+            ? slot.importantEvents.filter(e => e && typeof e === 'object').map(e => ({ ...e }))
+            : [],
+        lastUpdated: slot.lastUpdated || new Date().toISOString()
+    };
+}
+
+/**
+ * Normalizes a character or group memory document for Sticky Memory:
+ * - Ensures `personaMemories` map exists keyed by `String(personaId)`.
+ * - Automatically migrates legacy top-level `facts`, `summaries`, and `importantEvents`
+ *   into `personaMemories[activePersonaId]` if `personaMemories` did not exist yet.
+ * - Projects the active persona's slot onto top-level `facts`, `summaries`, and `importantEvents`.
+ */
+function normalizeMemoryDoc(rawDoc, idField = null, idValue = null, defaultPersonaId = '1') {
+    const now = new Date().toISOString();
+    const doc = (rawDoc && typeof rawDoc === 'object') ? { ...rawDoc } : {};
+    if (idField && idValue) doc[idField] = idValue;
+
+    const activePersonaId = String(doc.personaId || defaultPersonaId || '1');
+    doc.personaId = activePersonaId;
+
+    const hadPersonaMemories =
+        doc.personaMemories &&
+        typeof doc.personaMemories === 'object' &&
+        !Array.isArray(doc.personaMemories);
+
+    const personaMemories = {};
+    if (hadPersonaMemories) {
+        for (const [pid, slot] of Object.entries(doc.personaMemories)) {
+            if (slot && typeof slot === 'object') {
+                personaMemories[String(pid)] = sanitizeMemorySlot(slot);
+            }
+        }
+    }
+
+    if (!hadPersonaMemories) {
+        // Auto-migrate legacy flat arrays into the active persona's slot
+        personaMemories[activePersonaId] = sanitizeMemorySlot({
+            facts: doc.facts,
+            summaries: doc.summaries,
+            importantEvents: doc.importantEvents,
+            lastUpdated: doc.lastUpdated || now
+        });
+    } else if (!personaMemories[activePersonaId]) {
+        personaMemories[activePersonaId] = sanitizeMemorySlot({ lastUpdated: now });
+    }
+
+    doc.personaMemories = personaMemories;
+    const activeSlot = doc.personaMemories[activePersonaId];
+    doc.facts = [...activeSlot.facts];
+    doc.summaries = [...activeSlot.summaries];
+    doc.importantEvents = activeSlot.importantEvents.map(e => ({ ...e }));
+    doc.lastUpdated = doc.lastUpdated || activeSlot.lastUpdated || now;
+    delete doc.userPreferences;
+    return doc;
+}
+
+function getPersonaMemorySlot(rawDoc, personaId, idField = null, idValue = null) {
+    const targetId = String(personaId || (rawDoc && rawDoc.personaId) || '1');
+    const doc = normalizeMemoryDoc(rawDoc, idField, idValue, targetId);
+    if (doc.personaMemories && doc.personaMemories[targetId]) {
+        return sanitizeMemorySlot(doc.personaMemories[targetId]);
+    }
+    return sanitizeMemorySlot({});
+}
+
+function applyMemoryPutUpdate(existingRaw, body, idField, idValue, defaultPersonaId = '1') {
+    const now = new Date().toISOString();
+    const doc = normalizeMemoryDoc(existingRaw, idField, idValue, defaultPersonaId);
+
+    // Merge any per-persona slots sent in req.body.personaMemories
+    if (body && body.personaMemories && typeof body.personaMemories === 'object' && !Array.isArray(body.personaMemories)) {
+        for (const [pid, slot] of Object.entries(body.personaMemories)) {
+            if (slot && typeof slot === 'object') {
+                doc.personaMemories[String(pid)] = sanitizeMemorySlot(slot);
+            }
+        }
+    }
+
+    const targetPersonaId = String((body && body.personaId) || doc.personaId || defaultPersonaId || '1');
+    if (!doc.personaMemories[targetPersonaId]) {
+        doc.personaMemories[targetPersonaId] = sanitizeMemorySlot({ lastUpdated: now });
+    }
+
+    // Unless switching persona only, apply top-level facts/summaries/importantEvents to targetPersonaId's slot
+    if (!body || !body.switchPersonaOnly) {
+        const currentTargetSlot = doc.personaMemories[targetPersonaId];
+        doc.personaMemories[targetPersonaId] = sanitizeMemorySlot({
+            facts: (body && body.facts !== undefined) ? body.facts : currentTargetSlot.facts,
+            summaries: (body && body.summaries !== undefined) ? body.summaries : currentTargetSlot.summaries,
+            importantEvents: (body && body.importantEvents !== undefined) ? body.importantEvents : currentTargetSlot.importantEvents,
+            lastUpdated: now
+        });
+    }
+
+    doc.personaId = targetPersonaId;
+    const activeSlot = doc.personaMemories[targetPersonaId];
+    doc.facts = [...activeSlot.facts];
+    doc.summaries = [...activeSlot.summaries];
+    doc.importantEvents = activeSlot.importantEvents.map(e => ({ ...e }));
+    doc.lastUpdated = now;
+    delete doc.userPreferences;
+    return doc;
+}
 
 app.get('/api/memory/:characterId', (req, res) => {
     const fp = safePath(PRIVATE_MEMORY_DIR, req.params.characterId);
     if (!fp) return res.status(400).json({ error: 'Invalid character id' });
-    const mem = readJSON(fp, {
+    const rawMem = readJSON(fp, {
         characterId: req.params.characterId,
         facts: [],
         summaries: [],
@@ -1203,23 +1345,25 @@ app.get('/api/memory/:characterId', (req, res) => {
         personaId: '1',
         lastUpdated: new Date().toISOString()
     });
-    if (!mem.personaId) mem.personaId = '1';
+    const hadPersonaMemories = Boolean(rawMem && rawMem.personaMemories);
+    const mem = normalizeMemoryDoc(rawMem, 'characterId', req.params.characterId, '1');
+    if (!hadPersonaMemories && fs.existsSync(fp)) {
+        writeJSON(fp, mem);
+    }
     res.json(mem);
 });
 
 app.put('/api/memory/:characterId', (req, res) => {
     const fp = safePath(PRIVATE_MEMORY_DIR, req.params.characterId);
     if (!fp) return res.status(400).json({ error: 'Invalid character id' });
-    const existing = readJSON(fp, { characterId: req.params.characterId, facts: [], summaries: [], importantEvents: [], personaId: '1' });
-    const updated = {
-        ...existing,
-        facts: req.body.facts ?? existing.facts,
-        summaries: req.body.summaries ?? existing.summaries,
-        importantEvents: (req.body.importantEvents ?? existing.importantEvents ?? []).filter(e => e && typeof e === 'object'),
-        personaId: req.body.personaId ?? existing.personaId ?? '1',
-        lastUpdated: new Date().toISOString()
-    };
-    delete updated.userPreferences;
+    const existing = readJSON(fp, {
+        characterId: req.params.characterId,
+        facts: [],
+        summaries: [],
+        importantEvents: [],
+        personaId: '1'
+    });
+    const updated = applyMemoryPutUpdate(existing, req.body, 'characterId', req.params.characterId, '1');
     writeJSON(fp, updated);
     res.json(updated);
 });
@@ -1230,15 +1374,25 @@ app.get('/api/groups/:groupId/memory', (req, res) => {
     const groupFp = safePath(GROUP_CHATS_DIR, req.params.groupId);
     if (!fp || !groupFp) return res.status(400).json({ error: 'Invalid group id' });
     const group = readJSON(groupFp);
-    const mem = readJSON(fp, {
+    const defaultPid = (group && group.activePersonaId) ? String(group.activePersonaId) : '1';
+    const rawMem = readJSON(fp, {
         groupId: req.params.groupId,
         facts: [],
         summaries: [],
         importantEvents: [],
-        personaId: (group && group.activePersonaId) ? group.activePersonaId : '1',
+        personaId: defaultPid,
         lastUpdated: new Date().toISOString()
     });
-    if (!mem.personaId) mem.personaId = (group && group.activePersonaId) ? group.activePersonaId : '1';
+    if (group && group.activePersonaId) {
+        rawMem.personaId = String(group.activePersonaId);
+    } else if (!rawMem.personaId) {
+        rawMem.personaId = defaultPid;
+    }
+    const hadPersonaMemories = Boolean(rawMem && rawMem.personaMemories);
+    const mem = normalizeMemoryDoc(rawMem, 'groupId', req.params.groupId, defaultPid);
+    if (!hadPersonaMemories && fs.existsSync(fp)) {
+        writeJSON(fp, mem);
+    }
     res.json(mem);
 });
 
@@ -1246,26 +1400,20 @@ app.put('/api/groups/:groupId/memory', (req, res) => {
     const fp = safePath(GROUP_MEMORY_DIR, req.params.groupId);
     const groupFp = safePath(GROUP_CHATS_DIR, req.params.groupId);
     if (!fp || !groupFp) return res.status(400).json({ error: 'Invalid group id' });
+    const group = readJSON(groupFp);
+    const defaultPid = (group && group.activePersonaId) ? String(group.activePersonaId) : '1';
     const existing = readJSON(fp, {
         groupId: req.params.groupId,
         facts: [],
         summaries: [],
         importantEvents: [],
-        personaId: '1'
+        personaId: defaultPid
     });
 
-    const updated = {
-        ...existing,
-        facts: Array.isArray(req.body.facts) ? req.body.facts : existing.facts,
-        summaries: Array.isArray(req.body.summaries) ? req.body.summaries : existing.summaries,
-        importantEvents: (req.body.importantEvents ?? existing.importantEvents ?? []).filter(e => e && typeof e === 'object'),
-        personaId: req.body.personaId || existing.personaId || '1',
-        lastUpdated: new Date().toISOString()
-    };
+    const updated = applyMemoryPutUpdate(existing, req.body, 'groupId', req.params.groupId, defaultPid);
     writeJSON(fp, updated);
 
     // Sync activePersonaId to group file
-    const group = readJSON(groupFp);
     if (group) {
         group.activePersonaId = updated.personaId;
         group.updatedAt = new Date().toISOString();
@@ -1400,10 +1548,16 @@ app.post('/api/chat/send', async (req, res) => {
     const char = readJSON(charFp);
     if (!char) return res.status(404).json({ error: 'Character not found' });
 
-    // Load memory
-    const memory = readJSON(memFp, {
-        facts: [], summaries: [], importantEvents: [], userPreferences: {}
+    // Load memory (Sticky Memory per persona)
+    const rawMemory = readJSON(memFp, {
+        characterId,
+        facts: [],
+        summaries: [],
+        importantEvents: [],
+        personaId: '1'
     });
+    const memory = normalizeMemoryDoc(rawMemory, 'characterId', characterId, '1');
+    const activePersonaSlot = getPersonaMemorySlot(memory, memory.personaId, 'characterId', characterId);
 
     // Load chat history
     const chat = readJSON(chatFp);
@@ -1434,16 +1588,16 @@ app.post('/api/chat/send', async (req, res) => {
         systemParts.push(`\n## Example Dialogue Style\n${char.exampleDialogue}`);
     }
 
-    // Inject persistent memory
-    if (memory.facts && memory.facts.length > 0) {
-        systemParts.push(`\n## Important Facts You Remember\n${memory.facts.map(f => `- ${f}`).join('\n')}`);
+    // Inject persistent memory (from active persona's sticky slot)
+    if (activePersonaSlot.facts && activePersonaSlot.facts.length > 0) {
+        systemParts.push(`\n## Important Facts You Remember\n${activePersonaSlot.facts.map(f => `- ${f}`).join('\n')}`);
     }
-    if (memory.importantEvents && memory.importantEvents.length > 0) {
-        const recentEvents = memory.importantEvents.filter(e => e && typeof e === 'object').slice(-10);
+    if (activePersonaSlot.importantEvents && activePersonaSlot.importantEvents.length > 0) {
+        const recentEvents = activePersonaSlot.importantEvents.filter(e => e && typeof e === 'object').slice(-10);
         systemParts.push(`\n## Important Past Events\n${recentEvents.map(e => `- [${e.date || 'unknown'}] ${e.title ? e.title + ': ' : ''}${e.description || ''}`).join('\n')}`);
     }
-    if (memory.summaries && memory.summaries.length > 0) {
-        const recentSummaries = memory.summaries.slice(-3);
+    if (activePersonaSlot.summaries && activePersonaSlot.summaries.length > 0) {
+        const recentSummaries = activePersonaSlot.summaries.slice(-3);
         systemParts.push(`\n## Previous Conversation Summaries\n${recentSummaries.map(s => `- ${s}`).join('\n')}`);
     }
     const personaPrompt = formatPersonaPrompt(memory.personaId);
@@ -1618,7 +1772,9 @@ app.post('/api/chat/regenerate', async (req, res) => {
     }
 
     const char = readJSON(charFp);
-    const memory = readJSON(memFp, { facts: [], summaries: [], importantEvents: [], userPreferences: {} });
+    const rawMemory = readJSON(memFp, { characterId, facts: [], summaries: [], importantEvents: [], personaId: '1' });
+    const memory = normalizeMemoryDoc(rawMemory, 'characterId', characterId, '1');
+    const activePersonaSlot = getPersonaMemorySlot(memory, memory.personaId, 'characterId', characterId);
     const chat = readJSON(chatFp);
 
     if (!char || !chat || !Array.isArray(chat.messages) || chat.messages.length === 0) {
@@ -1652,9 +1808,9 @@ app.post('/api/chat/regenerate', async (req, res) => {
     if (char.scenario) systemParts.push(`\n## Current Scenario\n${char.scenario}`);
     if (char.systemPrompt) systemParts.push(`\n## Additional Instructions\n${char.systemPrompt}`);
     if (char.exampleDialogue) systemParts.push(`\n## Example Dialogue Style\n${char.exampleDialogue}`);
-    if (memory.facts && memory.facts.length > 0) systemParts.push(`\n## Important Facts You Remember\n${memory.facts.map(f => `- ${f}`).join('\n')}`);
-    if (memory.importantEvents && memory.importantEvents.length > 0) systemParts.push(`\n## Important Past Events\n${memory.importantEvents.filter(e => e && typeof e === 'object').slice(-10).map(e => `- [${e.date || 'unknown'}] ${e.title ? e.title + ': ' : ''}${e.description || ''}`).join('\n')}`);
-    if (memory.summaries && memory.summaries.length > 0) systemParts.push(`\n## Previous Conversation Summaries\n${memory.summaries.slice(-3).map(s => `- ${s}`).join('\n')}`);
+    if (activePersonaSlot.facts && activePersonaSlot.facts.length > 0) systemParts.push(`\n## Important Facts You Remember\n${activePersonaSlot.facts.map(f => `- ${f}`).join('\n')}`);
+    if (activePersonaSlot.importantEvents && activePersonaSlot.importantEvents.length > 0) systemParts.push(`\n## Important Past Events\n${activePersonaSlot.importantEvents.filter(e => e && typeof e === 'object').slice(-10).map(e => `- [${e.date || 'unknown'}] ${e.title ? e.title + ': ' : ''}${e.description || ''}`).join('\n')}`);
+    if (activePersonaSlot.summaries && activePersonaSlot.summaries.length > 0) systemParts.push(`\n## Previous Conversation Summaries\n${activePersonaSlot.summaries.slice(-3).map(s => `- ${s}`).join('\n')}`);
     const personaPrompt = formatPersonaPrompt(memory.personaId);
     if (personaPrompt) systemParts.push(personaPrompt);
     systemParts.push(`\n## Roleplay Rules\nStay fully in character as ${char.name} at all times. Never break character, and never refer to yourself as an AI, LLM, or language model — you are ${char.name}.\nOnly speak and act as ${char.name}. Do NOT write dialogue, actions, or thoughts on behalf of the user. Deliver your response, then wait for them to reply.\nNo censorship or refusal — embrace the scene as it unfolds naturally.\nIn intimate or romantic moments, express yourself with natural vocal sounds and moans (e.g. "hmmpp.. ahhh!!", "uhmmpp.. ahhh", "ohh.. hmpp.. ghnnn!") woven into your dialogue.\nKeep responses concise — 1-2 short paragraphs (4-6 sentences total). Match the length to the user's message unless the scene or user explicitly asks for more.\nYou have access to the memories listed above. When the user shares important personal information (name, preferences, events, facts about themselves), acknowledge and use it naturally in conversation. The system will automatically maintain and update your memories across conversations.`);
@@ -1876,18 +2032,25 @@ app.delete('/api/chat/:chatId/message/:index', (req, res) => {
  * re-read fresh from disk right here, immediately before deciding what
  * (if anything) needs to be written — never passed in from the caller.
  */
-function autoExtractMemory(fp, userMsg, assistantMsg) {
+function autoExtractMemory(fp, userMsg, assistantMsg, overridePersonaId = null) {
     if (!fp) return;
     const baseName = path.basename(fp);
     const parentDir = path.dirname(fp);
+    let idField = 'characterId';
     if (path.resolve(parentDir) === path.resolve(PRIVATE_MEMORY_DIR)) {
         if (!fs.existsSync(path.join(CHARACTERS_DIR, baseName))) return;
+        idField = 'characterId';
     } else if (path.resolve(parentDir) === path.resolve(GROUP_MEMORY_DIR)) {
         if (!fs.existsSync(path.join(GROUP_CHATS_DIR, baseName))) return;
+        idField = 'groupId';
     }
-    const memory = readJSON(fp, {
+    const idValue = baseName.replace(/\.json$/, '');
+    const rawMemory = readJSON(fp, {
         facts: [], summaries: [], importantEvents: [], personaId: '1'
     });
+    const memory = normalizeMemoryDoc(rawMemory, idField, idValue, '1');
+    const targetPid = String(overridePersonaId || memory.personaId || '1');
+    const slot = getPersonaMemorySlot(memory, targetPid, idField, idValue);
     let changed = false;
 
     // Detect preferences (suka/like, tidak suka/dislike)
@@ -1896,34 +2059,43 @@ function autoExtractMemory(fp, userMsg, assistantMsg) {
     // like "hai", turning "hai suka gak sama aku?" into a false "likes" fact.
     const likeMatch = userMsg.match(/\b(?:aku|saya|gue|gw|i)\b\s+(?:suka|like|love|senang|hobby)\b\s+(.+)/i);
     if (likeMatch) {
-        memory.facts = memory.facts || [];
+        slot.facts = slot.facts || [];
         const fact = `User menyukai: ${likeMatch[1].trim()}`;
-        if (!memory.facts.includes(fact)) {
-            memory.facts.push(fact);
+        if (!slot.facts.includes(fact)) {
+            slot.facts.push(fact);
             changed = true;
         }
     }
 
     const dislikeMatch = userMsg.match(/\b(?:aku|saya|gue|gw|i)\b\s+(?:tidak suka|benci|hate|dislike|nggak suka|ga suka)\b\s+(.+)/i);
     if (dislikeMatch) {
-        memory.facts = memory.facts || [];
+        slot.facts = slot.facts || [];
         const fact = `User tidak suka: ${dislikeMatch[1].trim()}`;
-        if (!memory.facts.includes(fact)) {
-            memory.facts.push(fact);
+        if (!slot.facts.includes(fact)) {
+            slot.facts.push(fact);
             changed = true;
         }
     }
 
     // Keep memory size manageable
-    if (memory.facts && memory.facts.length > 50) {
-        memory.facts = memory.facts.slice(-50);
+    if (slot.facts && slot.facts.length > 50) {
+        slot.facts = slot.facts.slice(-50);
     }
-    if (memory.importantEvents && memory.importantEvents.length > 20) {
-        memory.importantEvents = memory.importantEvents.slice(-20);
+    if (slot.importantEvents && slot.importantEvents.length > 20) {
+        slot.importantEvents = slot.importantEvents.slice(-20);
     }
 
     if (changed) {
-        memory.lastUpdated = new Date().toISOString();
+        const now = new Date().toISOString();
+        slot.lastUpdated = now;
+        memory.personaMemories[targetPid] = sanitizeMemorySlot(slot);
+        // Project active persona's slot onto top-level
+        const activePid = String(memory.personaId || targetPid);
+        const activeSlot = memory.personaMemories[activePid] || sanitizeMemorySlot({});
+        memory.facts = [...activeSlot.facts];
+        memory.summaries = [...activeSlot.summaries];
+        memory.importantEvents = activeSlot.importantEvents.map(e => ({ ...e }));
+        memory.lastUpdated = now;
         writeJSON(fp, memory);
     }
 }
@@ -1986,18 +2158,21 @@ app.post('/api/memory/:characterId/summarize', async (req, res) => {
 
     let userPersonaName = 'User';
     let charName = 'Character';
+    let summarizePersonaId = '1';
     const personas = getPersonas();
     if (isGroup) {
         const groupFp = safePath(GROUP_CHATS_DIR, characterId);
         const group = groupFp ? readJSON(groupFp) : null;
         const groupMem = readJSON(memFp);
-        const personaId = (groupMem && groupMem.personaId) || (group && group.activePersonaId);
-        const found = personaId ? personas.find(p => String(p.id) === String(personaId)) : null;
+        const personaId = req.body.personaId || (groupMem && groupMem.personaId) || (group && group.activePersonaId) || (personas[0] && personas[0].id) || '1';
+        summarizePersonaId = String(personaId);
+        const found = personas.find(p => String(p.id) === summarizePersonaId) || null;
         userPersonaName = (found && found.name) || (personas[0] && personas[0].name) || 'User';
     } else {
         const privMem = readJSON(memFp);
-        const personaId = privMem && privMem.personaId;
-        const found = personaId ? personas.find(p => String(p.id) === String(personaId)) : null;
+        const personaId = req.body.personaId || (privMem && privMem.personaId) || (personas[0] && personas[0].id) || '1';
+        summarizePersonaId = String(personaId);
+        const found = personas.find(p => String(p.id) === summarizePersonaId) || null;
         userPersonaName = (found && found.name) || (personas[0] && personas[0].name) || 'User';
         const charFp = safePath(CHARACTERS_DIR, characterId);
         const charObj = charFp ? readJSON(charFp) : null;
@@ -2125,17 +2300,18 @@ If there are no facts or events worth noting, write "- none" under that label in
             });
         }
 
-        // Parse extraction
-        const memory = readJSON(memFp, {
-            characterId, facts: [], summaries: [],
-            importantEvents: [], userPreferences: {}
+        // Parse extraction into the active persona's sticky memory slot
+        const idField = isGroup ? 'groupId' : 'characterId';
+        const rawMemory = readJSON(memFp, {
+            [idField]: characterId,
+            facts: [],
+            summaries: [],
+            importantEvents: [],
+            personaId: summarizePersonaId
         });
-
-        // Ensure arrays exist (if loaded from an old file without these keys)
-        memory.facts = memory.facts || [];
-        memory.summaries = memory.summaries || [];
-        memory.importantEvents = memory.importantEvents || [];
-        memory.userPreferences = memory.userPreferences || {};
+        const memory = normalizeMemoryDoc(rawMemory, idField, characterId, summarizePersonaId);
+        const targetPid = String(summarizePersonaId || memory.personaId || '1');
+        const slot = getPersonaMemorySlot(memory, targetPid, idField, characterId);
 
         // ── Lenient parsing ──
         // Real-world local/roleplay-tuned models don't always follow the exact
@@ -2157,7 +2333,7 @@ If there are no facts or events worth noting, write "- none" under that label in
                 .map(l => stripMd(l.replace(/^[-•]\s*/, '')))
                 .filter(l => l.length > 0 && !['none', 'n/a', '-'].includes(l.toLowerCase()));
             newFacts.forEach(f => {
-                if (!memory.facts.includes(f)) memory.facts.push(f);
+                if (!slot.facts.includes(f)) slot.facts.push(f);
             });
             factsFound = newFacts.length;
         }
@@ -2167,14 +2343,14 @@ If there are no facts or events worth noting, write "- none" under that label in
                 .map(l => stripMd(l.replace(/^[-•]\s*/, '')))
                 .filter(l => l.length > 0 && !['none', 'n/a', '-'].includes(l.toLowerCase()))
                 .map(e => ({ description: e, date: new Date().toISOString().split('T')[0] }));
-            memory.importantEvents.push(...newEvents);
+            slot.importantEvents.push(...newEvents);
             eventsFound = newEvents.length;
         }
 
         if (summaryMatch) {
             const summary = stripMd(summaryMatch[1]);
             if (summary && !['none', 'n/a', '-'].includes(summary.toLowerCase())) {
-                memory.summaries.push(summary);
+                slot.summaries.push(summary);
                 summaryFound = true;
             }
         }
@@ -2189,7 +2365,7 @@ If there are no facts or events worth noting, write "- none" under that label in
             console.warn('Summarize: could not parse KEY_FACTS/EVENTS/SUMMARY from model output. Raw output:', result.slice(0, 800));
             const fallback = result.slice(0, 600).trim();
             if (fallback) {
-                memory.summaries.push(fallback);
+                slot.summaries.push(fallback);
                 warning = 'The model\'s response didn\'t follow the expected format, so it was saved as a raw summary instead of structured facts/events. Check server logs for the full output.';
             }
         }
@@ -2197,11 +2373,25 @@ If there are no facts or events worth noting, write "- none" under that label in
         // Keep memory size manageable — mirrors the facts/events caps in
         // autoExtractMemory. Only the last 3 are ever injected into the
         // prompt anyway, so this just prevents unbounded file growth.
-        if (memory.summaries.length > 30) {
-            memory.summaries = memory.summaries.slice(-30);
+        if (slot.facts.length > 50) {
+            slot.facts = slot.facts.slice(-50);
+        }
+        if (slot.importantEvents.length > 20) {
+            slot.importantEvents = slot.importantEvents.slice(-20);
+        }
+        if (slot.summaries.length > 30) {
+            slot.summaries = slot.summaries.slice(-30);
         }
 
-        memory.lastUpdated = new Date().toISOString();
+        const now = new Date().toISOString();
+        slot.lastUpdated = now;
+        memory.personaMemories[targetPid] = sanitizeMemorySlot(slot);
+        const activePid = String(memory.personaId || targetPid);
+        const activeSlot = memory.personaMemories[activePid] || sanitizeMemorySlot({});
+        memory.facts = [...activeSlot.facts];
+        memory.summaries = [...activeSlot.summaries];
+        memory.importantEvents = activeSlot.importantEvents.map(e => ({ ...e }));
+        memory.lastUpdated = now;
         writeJSON(memFp, memory);
 
         res.json({ ok: true, memory, warning });
@@ -2281,17 +2471,20 @@ async function callGroupCharacterLLM({ group, messages, targetCharacterId, memFp
     const char = charFp ? readJSON(charFp) : null;
     if (!char) throw new Error('Target character not found');
 
-    const memory = readJSON(memFp, { facts: [], summaries: [], importantEvents: [] });
+    const rawMemory = readJSON(memFp, { characterId: targetCharacterId, facts: [], summaries: [], importantEvents: [], personaId: '1' });
     const groupMemFp = safePath(GROUP_MEMORY_DIR, group.id);
-    const groupMemory = groupMemFp ? readJSON(groupMemFp, { facts: [], summaries: [], importantEvents: [] }) : null;
+    const rawGroupMemory = groupMemFp ? readJSON(groupMemFp, { groupId: group.id, facts: [], summaries: [], importantEvents: [], personaId: group.activePersonaId || '1' }) : null;
 
     // Identify user persona name (fall back to personas[0]?.name || 'User' if personaId was deleted)
     const personas = getPersonas();
-    const effectivePersonaId = (groupMemory && groupMemory.personaId) || group.activePersonaId || memory.personaId;
+    const effectivePersonaId = String((rawGroupMemory && rawGroupMemory.personaId) || group.activePersonaId || rawMemory.personaId || (personas[0] && personas[0].id) || '1');
     const foundPersona = effectivePersonaId
-        ? personas.find(p => String(p.id) === String(effectivePersonaId))
+        ? personas.find(p => String(p.id) === effectivePersonaId)
         : null;
     const userName = (foundPersona && foundPersona.name) || (personas[0] && personas[0].name) || 'User';
+
+    const memory = getPersonaMemorySlot(rawMemory, effectivePersonaId, 'characterId', targetCharacterId);
+    const groupMemory = rawGroupMemory ? getPersonaMemorySlot(rawGroupMemory, effectivePersonaId, 'groupId', group.id) : null;
 
     // Load other member info for context
     const otherMembers = (group.characterIds || [])
@@ -2433,10 +2626,10 @@ async function callGroupCharacterLLM({ group, messages, targetCharacterId, memFp
     const groupStillExists = groupFp && fs.existsSync(groupFp);
     if (isRealUserMessage && chatStillExists && groupStillExists) {
         if (fs.existsSync(charFp)) {
-            autoExtractMemory(memFp, userPromptContext, assistantContent);
+            autoExtractMemory(memFp, userPromptContext, assistantContent, effectivePersonaId);
         }
         if (groupMemFp) {
-            autoExtractMemory(groupMemFp, userPromptContext, assistantContent);
+            autoExtractMemory(groupMemFp, userPromptContext, assistantContent, effectivePersonaId);
         }
     }
 
