@@ -212,7 +212,8 @@ body.settings-page {
 }
 
 .theme-mode-btn,
-.font-size-btn {
+.font-size-btn,
+.temporal-btn {
     padding: 6px 14px;
     font-size: 12.5px;
     font-weight: 500;
@@ -225,12 +226,14 @@ body.settings-page {
 }
 
 .theme-mode-btn:hover,
-.font-size-btn:hover {
+.font-size-btn:hover,
+.temporal-btn:hover {
     color: var(--text-primary);
 }
 
 .theme-mode-btn.active,
-.font-size-btn.active {
+.font-size-btn.active,
+.temporal-btn.active {
     background: var(--bg-secondary);
     color: var(--text-primary);
     border-color: var(--border-color);

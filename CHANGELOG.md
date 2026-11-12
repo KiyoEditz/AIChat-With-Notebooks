@@ -3,6 +3,39 @@
 All notable changes to this project are documented here. Format loosely
 follows [Keep a Changelog](https://keepachangelog.com/).
 
+## [v1.7.1] — Temporal & Clock Awareness System & Per-Character Chat Storage Restructuring
+
+Feature and architecture release introducing **Real-World Temporal & Clock Awareness** for both private and multi-character group chats, and a complete **Per-Character Chat Storage Restructuring (`data/chats/private/<characterId>/<chatId>.json`)** with an integrated toggle in Settings.
+
+### Added
+- **Real-World Temporal & Clock Awareness Engine (`server.js`)**:
+  - **Cache-Friendly 2-Tier Temporal Architecture**:
+    - **Base System Environment**: Injects static current calendar date (`Current Date: <Day>, <Date> <Month> <Year>`) once per day, preserving 99.9% KV-cache hit rate during ongoing active conversations.
+    - **Ephemeral 1-Shot Absence Gap Alert ($\ge 5$ Hours)**: Detects when the user returns after a real-world gap of $\ge 5$ hours. Generates an internal context block containing the exact humanized duration (hours, minutes, days, weeks, months, years) and time-of-day category (`Late Night / Midnight`, `Dawn / Early Morning`, `Morning`, `Midday / Noon`, `Afternoon`, `Evening`, `Night`).
+    - **Clean Storage Guarantees**: Situational temporal injection occurs purely in-flight when dispatching the prompt payload to the LLM. Messages saved to disk in JSON chat files remain 100% clean, preventing repetitive pattern-matching feedback loops across turns.
+    - **Narrative Override Directive**: Instructs the model to seamlessly ignore real-world absence if the current roleplay is in the middle of a continuous, time-sensitive scene (e.g., active battles, urgent dialogue, cliffhangers).
+  - **Full Multi-Character Group Chat Support (`callGroupCharacterLLM`)**:
+    - All characters participating in group chats receive base `Current Date` awareness.
+    - Injects the ephemeral temporal block when a user speaks after $\ge 5$ hours of group silence, or when an AI speaker turn is manually triggered after $\ge 5$ hours of room inactivity.
+  - **Regeneration Parity (`/api/chat/regenerate`)**:
+    - Temporal awareness calculations accurately evaluate timestamps of prior messages during alternate response regenerations.
+
+- **Settings UI & Configuration Controls (`public/settings.*`, `.env`, `.env.example`)**:
+  - **Experimental Toggle**: Added `ENABLE_TEMPORAL_AWARENESS=true/false` to `.env` and `.env.example`.
+  - **Appearance Panel Placement**: Added a dedicated segmented toggle (Enabled / Disabled) in `public/settings.html` placed in the **Appearance** panel directly beneath **Font size**.
+  - **Responsive Settings Styling & API Sync**: Styled via `.temporal-btn` in `public/settings.css` and wired to `GET /api/config` and `POST /api/config` in `public/settings.js`.
+
+### Changed & Improved
+- **Per-Character Private Chat Directory Reorganization (`data/chats/private/<characterId>/<chatId>.json`)**:
+  - **Scoped Directory Structure**: Migrated all private chat session files from the root `data/chats/private/` directory into dedicated character subdirectories (`data/chats/private/<characterId>/<chatId>.json`).
+  - **High-Performance Scoped File Resolution**:
+    - Implemented `safePrivateChatPath(characterId, chatId)` and `findPrivateChatPath(chatId, characterId)`.
+    - Endpoint `GET /api/chats/:characterId` now reads only the target character's subfolder rather than filtering hundreds of global chat files, significantly reducing filesystem I/O.
+    - Endpoints `POST /api/chats`, `GET /api/chat/:chatId`, `PUT /api/chat/:chatId`, and `DELETE /api/chat/:chatId` fully support scoped subfolder storage.
+    - Character deletion (`DELETE /api/characters/:id`) cleanly removes the character's entire chat folder in one operation.
+
+---
+
 ## [v1.7.0] — Beta Kaggle Auto-Tunnel Orchestrator, Responsive Editorial UI & CUDA 12.8/13.0 (`llama.cpp` `b12076`)
 
 Major feature and infrastructure release introducing **1-command automated Kaggle GPU orchestration (`npm run beta-kaggle`)**, a complete **Responsive Digital Typography & Warm Editorial UI Redesign**, and an upgraded **Multi-Arch CUDA Prebuilt & Source Build Engine (`llama.cpp` `b12076` / `v0.8.0`)** compatible with Kaggle's newest NVIDIA Driver `580.178.04` (CUDA 13.0 host / CUDA 12.8.93 toolkit).

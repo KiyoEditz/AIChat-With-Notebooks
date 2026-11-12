@@ -89,6 +89,10 @@
             }
             modelSelect.value = modelVal;
         }
+
+        if (config.enableTemporalAwareness !== undefined) {
+            reflectTemporalAwareness(config.enableTemporalAwareness);
+        }
     }
 
     const apiKeyInput = document.getElementById('cfg-api-key');
@@ -259,6 +263,26 @@
                 const updated = window.AIChatTheme.setFontSize(size);
                 reflectThemeInputs(updated);
                 flashSaved();
+            }
+        });
+    });
+
+    function reflectTemporalAwareness(enabled) {
+        const isTrue = enabled === true || enabled === 'true';
+        document.querySelectorAll('.temporal-btn').forEach(btn => {
+            btn.classList.toggle('active', (btn.dataset.enabled === 'true') === isTrue);
+        });
+    }
+
+    document.querySelectorAll('.temporal-btn').forEach(btn => {
+        btn.addEventListener('click', async () => {
+            const enabled = btn.dataset.enabled === 'true';
+            reflectTemporalAwareness(enabled);
+            flashSaved();
+            try {
+                await api('POST', '/api/config', { enableTemporalAwareness: enabled });
+            } catch (err) {
+                console.error('Failed to update temporal awareness config:', err);
             }
         });
     });

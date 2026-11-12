@@ -59,6 +59,134 @@ function safeGroupChatPath(groupId, chatId) {
     return resolved;
 }
 
+function safePrivateChatPath(characterId, chatId) {
+    if (typeof characterId !== 'string' || !ID_RE.test(characterId)) return null;
+    if (typeof chatId !== 'string' || !ID_RE.test(chatId)) return null;
+    const charDir = path.resolve(PRIVATE_CHATS_DIR, characterId);
+    const resolvedBase = charDir + path.sep;
+    const resolved = path.resolve(charDir, `${chatId}.json`);
+    if (!resolved.startsWith(resolvedBase)) return null;
+    return resolved;
+}
+
+function findPrivateChatPath(chatId, characterId = null) {
+    if (typeof chatId !== 'string' || !ID_RE.test(chatId)) return null;
+    if (characterId && typeof characterId === 'string' && ID_RE.test(characterId)) {
+        const p = safePrivateChatPath(characterId, chatId);
+        if (p && fs.existsSync(p)) return p;
+    }
+    // Search within character subdirectories
+    if (fs.existsSync(PRIVATE_CHATS_DIR)) {
+        const entries = fs.readdirSync(PRIVATE_CHATS_DIR, { withFileTypes: true });
+        for (const ent of entries) {
+            if (ent.isDirectory() && ID_RE.test(ent.name)) {
+                const candidate = path.join(PRIVATE_CHATS_DIR, ent.name, `${chatId}.json`);
+                if (fs.existsSync(candidate)) {
+                    return candidate;
+                }
+            }
+        }
+    }
+    // Fallback to legacy root path just in case
+    const legacy = safePath(PRIVATE_CHATS_DIR, chatId);
+    if (legacy && fs.existsSync(legacy)) return legacy;
+    return null;
+}
+
+// ── Helper: Temporal Awareness & Precision Time ─────────────
+function getTimeOfDayPeriod(date) {
+    const h = date.getHours();
+    if (h >= 0 && h < 4) return 'Late Night / Midnight';
+    if (h >= 4 && h < 6) return 'Dawn / Early Morning';
+    if (h >= 6 && h < 12) return 'Morning';
+    if (h >= 12 && h < 14) return 'Midday / Noon';
+    if (h >= 14 && h < 18) return 'Afternoon';
+    if (h >= 18 && h < 21) return 'Evening';
+    return 'Night';
+}
+
+function getAccurateDurationString(lastDate, currentDate) {
+    let diffMs = currentDate.getTime() - lastDate.getTime();
+    if (diffMs < 0) diffMs = 0;
+
+    const totalMinutes = Math.floor(diffMs / (1000 * 60));
+    const totalHours = Math.floor(diffMs / (1000 * 60 * 60));
+    const totalDays = Math.floor(diffMs / (1000 * 60 * 60 * 24));
+
+    if (totalDays >= 365) {
+        const years = Math.floor(totalDays / 365);
+        const remDays = totalDays % 365;
+        const months = Math.floor(remDays / 30);
+        const parts = [`${years} ${years === 1 ? 'year' : 'years'}`];
+        if (months > 0) parts.push(`${months} ${months === 1 ? 'month' : 'months'}`);
+        return parts.join(', ');
+    }
+
+    if (totalDays >= 60) {
+        const months = Math.floor(totalDays / 30);
+        const remDays = totalDays % 30;
+        const parts = [`${months} ${months === 1 ? 'month' : 'months'}`];
+        if (remDays > 0) parts.push(`${remDays} ${remDays === 1 ? 'day' : 'days'}`);
+        return parts.join(', ');
+    }
+
+    if (totalDays >= 14) {
+        const weeks = Math.floor(totalDays / 7);
+        const remDays = totalDays % 7;
+        const parts = [`${weeks} ${weeks === 1 ? 'week' : 'weeks'}`];
+        if (remDays > 0) parts.push(`${remDays} ${remDays === 1 ? 'day' : 'days'}`);
+        return parts.join(', ');
+    }
+
+    if (totalDays >= 1) {
+        const remHours = totalHours % 24;
+        const parts = [`${totalDays} ${totalDays === 1 ? 'day' : 'days'}`];
+        if (remHours > 0) parts.push(`${remHours} ${remHours === 1 ? 'hour' : 'hours'}`);
+        return parts.join(' and ');
+    }
+
+    const remMins = totalMinutes % 60;
+    const parts = [`${totalHours} ${totalHours === 1 ? 'hour' : 'hours'}`];
+    if (remMins > 0) parts.push(`${remMins} ${remMins === 1 ? 'minute' : 'minutes'}`);
+    return parts.join(' and ');
+}
+
+function formatReadableDateTime(date) {
+    const days = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+    const months = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
+    const dayName = days[date.getDay()];
+    const monthName = months[date.getMonth()];
+    const day = date.getDate();
+    const year = date.getFullYear();
+    const hours = String(date.getHours()).padStart(2, '0');
+    const minutes = String(date.getMinutes()).padStart(2, '0');
+    return `${dayName}, ${day} ${monthName} ${year}, ${hours}:${minutes}`;
+}
+
+function formatReadableDateOnly(date) {
+    const days = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+    const months = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
+    return `${days[date.getDay()]}, ${date.getDate()} ${months[date.getMonth()]} ${date.getFullYear()}`;
+}
+
+function buildTemporalPromptBlock(lastDate, currentDate) {
+    const lastPeriod = getTimeOfDayPeriod(lastDate);
+    const currentPeriod = getTimeOfDayPeriod(currentDate);
+    const lastFormatted = formatReadableDateTime(lastDate);
+    const currentFormatted = formatReadableDateTime(currentDate);
+    const durationStr = getAccurateDurationString(lastDate, currentDate);
+
+    return `\n## Temporal Awareness
+- Status: User has returned after a period of absence.
+- Last Interaction: ${lastFormatted} (${lastPeriod})
+- Current Time: ${currentFormatted} (${currentPeriod})
+- Elapsed Duration: ${durationStr}
+- Interaction Guidance:
+  * You possess natural awareness of the real-world passage of time and the current time of day.
+  * If fitting for your personality and conversational context, you may naturally acknowledge their return, tease/comment on their absence, or greet them according to the current time of day.
+  * Narrative Override: If the ongoing chat is in the middle of an urgent, continuous roleplay action or intense narrative scene, prioritize narrative flow and ignore the real-world time gap so immersion is preserved.`;
+}
+
 // ── Middleware ───────────────────────────────────────────────
 app.use(express.json({ limit: '50mb' }));
 app.use(express.static(path.join(__dirname, 'public')));
@@ -239,12 +367,13 @@ app.get('/api/config', (req, res) => {
         modelName: process.env.MODEL_NAME || 'character1',
         port: process.env.PORT || 3000,
         uiLang: uiLang,
-        showLangWarning: showLangWarning
+        showLangWarning: showLangWarning,
+        enableTemporalAwareness: (process.env.ENABLE_TEMPORAL_AWARENESS || 'true').toLowerCase() === 'true'
     });
 });
 
 app.post('/api/config', (req, res) => {
-    const { baseUrl, apiKey, modelName } = req.body;
+    const { baseUrl, apiKey, modelName, enableTemporalAwareness } = req.body;
     const envPath = path.join(__dirname, '.env');
     let envContent = '';
     try { envContent = fs.readFileSync(envPath, 'utf8'); } catch { }
@@ -253,6 +382,7 @@ app.post('/api/config', (req, res) => {
     if (baseUrl !== undefined) updates.BASE_URL = baseUrl;
     if (apiKey !== undefined) updates.API_KEY = apiKey;
     if (modelName !== undefined) updates.MODEL_NAME = modelName;
+    if (enableTemporalAwareness !== undefined) updates.ENABLE_TEMPORAL_AWARENESS = String(enableTemporalAwareness);
 
     for (const [key, val] of Object.entries(updates)) {
         const regex = new RegExp(`^${key}=.*$`, 'm');
@@ -358,13 +488,10 @@ app.delete('/api/characters/:id', (req, res) => {
     // Also delete associated memory
     if (fs.existsSync(memFp)) fs.unlinkSync(memFp);
     // Delete all chats for this character
-    const chatFiles = fs.readdirSync(PRIVATE_CHATS_DIR).filter(f => f.endsWith('.json'));
-    chatFiles.forEach(f => {
-        const chat = readJSON(path.join(PRIVATE_CHATS_DIR, f));
-        if (chat && chat.characterId === req.params.id) {
-            fs.unlinkSync(path.join(PRIVATE_CHATS_DIR, f));
-        }
-    });
+    const charChatDir = path.join(PRIVATE_CHATS_DIR, req.params.id);
+    if (fs.existsSync(charChatDir)) {
+        fs.rmSync(charChatDir, { recursive: true, force: true });
+    }
     res.json({ ok: true });
 });
 
@@ -374,26 +501,30 @@ app.delete('/api/characters/:id', (req, res) => {
 
 // List all chats for a character
 app.get('/api/chats/:characterId', (req, res) => {
-    const files = fs.readdirSync(PRIVATE_CHATS_DIR).filter(f => f.endsWith('.json'));
-    const chats = files
-        .map(f => readJSON(path.join(PRIVATE_CHATS_DIR, f)))
-        .filter(c => c && c.characterId === req.params.characterId)
-        .map(c => ({
-            id: c.id,
-            characterId: c.characterId,
-            title: c.title || 'Untitled Chat',
-            messageCount: (c.messages || []).length,
-            createdAt: c.createdAt,
-            updatedAt: c.updatedAt
-        }));
-    chats.sort((a, b) => (b.updatedAt || '').localeCompare(a.updatedAt || ''));
+    const charDir = path.join(PRIVATE_CHATS_DIR, req.params.characterId);
+    let chats = [];
+    if (fs.existsSync(charDir)) {
+        const files = fs.readdirSync(charDir).filter(f => f.endsWith('.json'));
+        chats = files
+            .map(f => readJSON(path.join(charDir, f)))
+            .filter(c => c && c.characterId === req.params.characterId)
+            .map(c => ({
+                id: c.id,
+                characterId: c.characterId,
+                title: c.title || 'Untitled Chat',
+                messageCount: (c.messages || []).length,
+                createdAt: c.createdAt,
+                updatedAt: c.updatedAt
+            }));
+        chats.sort((a, b) => (b.updatedAt || '').localeCompare(a.updatedAt || ''));
+    }
     res.json(chats);
 });
 
 // Get full chat
 app.get('/api/chat/:chatId', (req, res) => {
-    const fp = safePath(PRIVATE_CHATS_DIR, req.params.chatId);
-    if (!fp) return res.status(400).json({ error: 'Invalid chat id' });
+    const fp = findPrivateChatPath(req.params.chatId);
+    if (!fp) return res.status(404).json({ error: 'Chat not found' });
     const chat = readJSON(fp);
     if (!chat) return res.status(404).json({ error: 'Chat not found' });
 
@@ -416,6 +547,9 @@ app.get('/api/chat/:chatId', (req, res) => {
 
 // Create new chat
 app.post('/api/chats', (req, res) => {
+    if (!req.body.characterId || typeof req.body.characterId !== 'string' || !ID_RE.test(req.body.characterId)) {
+        return res.status(400).json({ error: 'Valid characterId is required' });
+    }
     const id = uuidv4();
     const now = new Date().toISOString();
     const rawMessages = Array.isArray(req.body.messages) ? req.body.messages : [];
@@ -431,14 +565,18 @@ app.post('/api/chats', (req, res) => {
         createdAt: now,
         updatedAt: now
     };
-    writeJSON(path.join(PRIVATE_CHATS_DIR, `${id}.json`), chat);
+    const targetDir = path.join(PRIVATE_CHATS_DIR, req.body.characterId);
+    if (!fs.existsSync(targetDir)) {
+        fs.mkdirSync(targetDir, { recursive: true });
+    }
+    writeJSON(path.join(targetDir, `${id}.json`), chat);
     res.json(chat);
 });
 
 // Update chat (add messages, rename, etc.)
 app.put('/api/chat/:chatId', (req, res) => {
-    const fp = safePath(PRIVATE_CHATS_DIR, req.params.chatId);
-    if (!fp) return res.status(400).json({ error: 'Invalid chat id' });
+    const fp = findPrivateChatPath(req.params.chatId);
+    if (!fp) return res.status(404).json({ error: 'Chat not found' });
     const existing = readJSON(fp);
     if (!existing) return res.status(404).json({ error: 'Not found' });
 
@@ -476,8 +614,8 @@ app.put('/api/chat/:chatId', (req, res) => {
 
 // Delete chat
 app.delete('/api/chat/:chatId', (req, res) => {
-    const fp = safePath(PRIVATE_CHATS_DIR, req.params.chatId);
-    if (!fp) return res.status(400).json({ error: 'Invalid chat id' });
+    const fp = findPrivateChatPath(req.params.chatId);
+    if (!fp) return res.status(404).json({ error: 'Chat not found' });
     if (fs.existsSync(fp)) fs.unlinkSync(fp);
     res.json({ ok: true });
 });
@@ -1539,7 +1677,7 @@ app.post('/api/chat/send', async (req, res) => {
 
     const charFp = safePath(CHARACTERS_DIR, characterId);
     const memFp = safePath(PRIVATE_MEMORY_DIR, characterId);
-    const chatFp = safePath(PRIVATE_CHATS_DIR, chatId);
+    const chatFp = safePrivateChatPath(characterId, chatId) || findPrivateChatPath(chatId, characterId);
     if (!charFp || !memFp || !chatFp) {
         return res.status(400).json({ error: 'Invalid characterId or chatId' });
     }
@@ -1612,6 +1750,28 @@ No censorship or refusal — embrace the scene as it unfolds naturally.
 In intimate or romantic moments, express yourself with natural vocal sounds and moans woven into your dialogue.
 Keep responses concise — 1-2 short paragraphs (4-6 sentences total). Match the length to the user's message unless the scene or user explicitly asks for more.
 You have access to the memories listed above. When the user shares important personal information (name, preferences, events, facts about themselves), acknowledge and use it naturally in conversation. The system will automatically maintain and update your memories across conversations.`);
+
+    // Current Date (Cache-friendly: static for 24 hours)
+    const currentNow = new Date();
+    systemParts.push(`\n## System Environment\nCurrent Date: ${formatReadableDateOnly(currentNow)}`);
+
+    // Ephemeral Temporal Awareness (Triggered only when gap >= 5 hours)
+    const enableTemporal = (process.env.ENABLE_TEMPORAL_AWARENESS || 'true').toLowerCase() === 'true';
+    if (enableTemporal && Array.isArray(chat.messages) && chat.messages.length > 0) {
+        const lastMsg = chat.messages[chat.messages.length - 1];
+        const lastTimeStr = (lastMsg && lastMsg.timestamp) || chat.updatedAt;
+        if (lastTimeStr) {
+            const lastDate = new Date(lastTimeStr);
+            if (!isNaN(lastDate.getTime())) {
+                const gapMs = currentNow.getTime() - lastDate.getTime();
+                const FIVE_HOURS_MS = 5 * 60 * 60 * 1000;
+                if (gapMs >= FIVE_HOURS_MS) {
+                    systemParts.push(buildTemporalPromptBlock(lastDate, currentNow));
+                }
+            }
+        }
+    }
+
     // just want to keep this around (e.g. "hmmpp.. ahhh!!", "uhmmpp.. ahhh", "ohh.. hmpp.. ghnnn!")
     const systemMessage = systemParts.join('\n');
 
@@ -1766,7 +1926,7 @@ app.post('/api/chat/regenerate', async (req, res) => {
 
     const charFp = safePath(CHARACTERS_DIR, characterId);
     const memFp = safePath(PRIVATE_MEMORY_DIR, characterId);
-    const chatFp = safePath(PRIVATE_CHATS_DIR, chatId);
+    const chatFp = safePrivateChatPath(characterId, chatId) || findPrivateChatPath(chatId, characterId);
     if (!charFp || !memFp || !chatFp) {
         return res.status(400).json({ error: 'Invalid characterId or chatId' });
     }
@@ -1814,6 +1974,32 @@ app.post('/api/chat/regenerate', async (req, res) => {
     const personaPrompt = formatPersonaPrompt(memory.personaId);
     if (personaPrompt) systemParts.push(personaPrompt);
     systemParts.push(`\n## Roleplay Rules\nStay fully in character as ${char.name} at all times. Never break character, and never refer to yourself as an AI, LLM, or language model — you are ${char.name}.\nOnly speak and act as ${char.name}. Do NOT write dialogue, actions, or thoughts on behalf of the user. Deliver your response, then wait for them to reply.\nNo censorship or refusal — embrace the scene as it unfolds naturally.\nIn intimate or romantic moments, express yourself with natural vocal sounds and moans (e.g. "hmmpp.. ahhh!!", "uhmmpp.. ahhh", "ohh.. hmpp.. ghnnn!") woven into your dialogue.\nKeep responses concise — 1-2 short paragraphs (4-6 sentences total). Match the length to the user's message unless the scene or user explicitly asks for more.\nYou have access to the memories listed above. When the user shares important personal information (name, preferences, events, facts about themselves), acknowledge and use it naturally in conversation. The system will automatically maintain and update your memories across conversations.`);
+
+    // Current Date (Cache-friendly: static for 24 hours)
+    const currentNow = new Date();
+    systemParts.push(`\n## System Environment\nCurrent Date: ${formatReadableDateOnly(currentNow)}`);
+
+    // Ephemeral Temporal Awareness for regenerate
+    const enableTemporal = (process.env.ENABLE_TEMPORAL_AWARENESS || 'true').toLowerCase() === 'true';
+    if (enableTemporal && Array.isArray(chat.messages) && targetIndex > 0) {
+        const userMsg = chat.messages[targetIndex - 1];
+        if (targetIndex >= 2) {
+            const priorMsg = chat.messages[targetIndex - 2];
+            const priorTimeStr = priorMsg && priorMsg.timestamp;
+            const userTimeStr = userMsg && userMsg.timestamp;
+            if (priorTimeStr && userTimeStr) {
+                const priorDate = new Date(priorTimeStr);
+                const userDate = new Date(userTimeStr);
+                if (!isNaN(priorDate.getTime()) && !isNaN(userDate.getTime())) {
+                    const gapMs = userDate.getTime() - priorDate.getTime();
+                    const FIVE_HOURS_MS = 5 * 60 * 60 * 1000;
+                    if (gapMs >= FIVE_HOURS_MS) {
+                        systemParts.push(buildTemporalPromptBlock(priorDate, userDate));
+                    }
+                }
+            }
+        }
+    }
 
     const systemMessage = systemParts.join('\n');
     const messages = [{ role: 'system', content: systemMessage }];
@@ -1908,8 +2094,8 @@ app.post('/api/chat/regenerate', async (req, res) => {
 app.put('/api/chat/:chatId/alternate', (req, res) => {
     const { messageId, selectedAlternate } = req.body;
     let messageIndex = req.body.messageIndex !== undefined ? Number(req.body.messageIndex) : undefined;
-    const fp = safePath(PRIVATE_CHATS_DIR, req.params.chatId);
-    if (!fp) return res.status(400).json({ error: 'Invalid chat id' });
+    const fp = findPrivateChatPath(req.params.chatId);
+    if (!fp) return res.status(404).json({ error: 'Chat not found' });
     const chat = readJSON(fp);
     if (!chat || !Array.isArray(chat.messages)) {
         return res.status(404).json({ error: 'Not found' });
@@ -1944,8 +2130,8 @@ app.put('/api/chat/:chatId/alternate', (req, res) => {
 app.put('/api/chat/:chatId/message', (req, res) => {
     const { content, messageId } = req.body;
     let messageIndex = req.body.messageIndex !== undefined ? Number(req.body.messageIndex) : undefined;
-    const fp = safePath(PRIVATE_CHATS_DIR, req.params.chatId);
-    if (!fp) return res.status(400).json({ error: 'Invalid chat id' });
+    const fp = findPrivateChatPath(req.params.chatId);
+    if (!fp) return res.status(404).json({ error: 'Chat not found' });
     if (typeof content !== 'string') {
         return res.status(400).json({ error: 'content must be a string' });
     }
@@ -1987,8 +2173,8 @@ app.put('/api/chat/:chatId/message', (req, res) => {
 
 app.delete('/api/chat/:chatId/message/:index', (req, res) => {
     const param = req.params.index;
-    const fp = safePath(PRIVATE_CHATS_DIR, req.params.chatId);
-    if (!fp) return res.status(400).json({ error: 'Invalid chat id' });
+    const fp = findPrivateChatPath(req.params.chatId);
+    if (!fp) return res.status(404).json({ error: 'Chat not found' });
 
     const chat = readJSON(fp);
     if (!chat || !Array.isArray(chat.messages)) {
@@ -2133,7 +2319,7 @@ app.post('/api/memory/:characterId/summarize', async (req, res) => {
         }
     } else {
         memFp = safePath(PRIVATE_MEMORY_DIR, characterId);
-        const chatFp = safePath(PRIVATE_CHATS_DIR, chatId);
+        const chatFp = safePrivateChatPath(characterId, chatId) || findPrivateChatPath(chatId, characterId);
         if (chatFp && fs.existsSync(chatFp)) {
             chat = readJSON(chatFp);
         }
@@ -2565,6 +2751,47 @@ async function callGroupCharacterLLM({ group, messages, targetCharacterId, memFp
 3. React naturally to what the others have said, speaking to ${userName} or addressing other characters by name as appropriate.
 4. Keep responses punchy and concise (1-2 short paragraphs, 3-6 sentences total).
 5. Do NOT prefix your output with "${char.name}:" or "[${char.name}]:" — speak directly in first-person.`);
+
+    // Current Date (Cache-friendly: static for 24 hours)
+    const currentNow = new Date();
+    systemParts.push(`\n## System Environment\nCurrent Date: ${formatReadableDateOnly(currentNow)}`);
+
+    // Ephemeral Temporal Awareness for Group Chat (Triggered only when gap >= 5 hours)
+    const enableTemporal = (process.env.ENABLE_TEMPORAL_AWARENESS || 'true').toLowerCase() === 'true';
+    if (enableTemporal && Array.isArray(messages) && messages.length > 0) {
+        const latestMsg = messages[messages.length - 1];
+        const isUserMsg = latestMsg && (latestMsg.senderType === 'user' || latestMsg.role === 'user');
+        const isUserRecent = isUserMsg && latestMsg.timestamp && (currentNow.getTime() - new Date(latestMsg.timestamp).getTime() < 5 * 60 * 1000);
+        const isRegenUserMsg = userPromptContext === 'Regenerate response' && isUserMsg;
+
+        if ((isUserRecent || isRegenUserMsg) && messages.length >= 2) {
+            // User message: compare user message timestamp with prior message timestamp
+            const priorMsg = messages[messages.length - 2];
+            const priorTimeStr = priorMsg && priorMsg.timestamp;
+            const userTimeStr = latestMsg.timestamp;
+            if (priorTimeStr && userTimeStr) {
+                const priorDate = new Date(priorTimeStr);
+                const userDate = new Date(userTimeStr);
+                if (!isNaN(priorDate.getTime()) && !isNaN(userDate.getTime())) {
+                    const gapMs = userDate.getTime() - priorDate.getTime();
+                    const FIVE_HOURS_MS = 5 * 60 * 60 * 1000;
+                    if (gapMs >= FIVE_HOURS_MS) {
+                        systemParts.push(buildTemporalPromptBlock(priorDate, userDate));
+                    }
+                }
+            }
+        } else if (!isUserRecent && latestMsg && latestMsg.timestamp) {
+            // Continuation / turn trigger: compare currentNow with latest message
+            const lastDate = new Date(latestMsg.timestamp);
+            if (!isNaN(lastDate.getTime())) {
+                const gapMs = currentNow.getTime() - lastDate.getTime();
+                const FIVE_HOURS_MS = 5 * 60 * 60 * 1000;
+                if (gapMs >= FIVE_HOURS_MS) {
+                    systemParts.push(buildTemporalPromptBlock(lastDate, currentNow));
+                }
+            }
+        }
+    }
 
     const systemMessage = systemParts.join('\n');
 
