@@ -59,6 +59,40 @@ function safeGroupChatPath(groupId, chatId) {
     return resolved;
 }
 
+function safePrivateChatPath(characterId, chatId) {
+    if (typeof characterId !== 'string' || !ID_RE.test(characterId)) return null;
+    if (typeof chatId !== 'string' || !ID_RE.test(chatId)) return null;
+    const charDir = path.resolve(PRIVATE_CHATS_DIR, characterId);
+    const resolvedBase = charDir + path.sep;
+    const resolved = path.resolve(charDir, `${chatId}.json`);
+    if (!resolved.startsWith(resolvedBase)) return null;
+    return resolved;
+}
+
+function findPrivateChatPath(chatId, characterId = null) {
+    if (typeof chatId !== 'string' || !ID_RE.test(chatId)) return null;
+    if (characterId && typeof characterId === 'string' && ID_RE.test(characterId)) {
+        const p = safePrivateChatPath(characterId, chatId);
+        if (p && fs.existsSync(p)) return p;
+    }
+    // Search within character subdirectories
+    if (fs.existsSync(PRIVATE_CHATS_DIR)) {
+        const entries = fs.readdirSync(PRIVATE_CHATS_DIR, { withFileTypes: true });
+        for (const ent of entries) {
+            if (ent.isDirectory() && ID_RE.test(ent.name)) {
+                const candidate = path.join(PRIVATE_CHATS_DIR, ent.name, `${chatId}.json`);
+                if (fs.existsSync(candidate)) {
+                    return candidate;
+                }
+            }
+        }
+    }
+    // Fallback to legacy root path just in case
+    const legacy = safePath(PRIVATE_CHATS_DIR, chatId);
+    if (legacy && fs.existsSync(legacy)) return legacy;
+    return null;
+}
+
 // ── Middleware ───────────────────────────────────────────────
 app.use(express.json({ limit: '50mb' }));
 app.use(express.static(path.join(__dirname, 'public')));
@@ -358,13 +392,10 @@ app.delete('/api/characters/:id', (req, res) => {
     // Also delete associated memory
     if (fs.existsSync(memFp)) fs.unlinkSync(memFp);
     // Delete all chats for this character
-    const chatFiles = fs.readdirSync(PRIVATE_CHATS_DIR).filter(f => f.endsWith('.json'));
-    chatFiles.forEach(f => {
-        const chat = readJSON(path.join(PRIVATE_CHATS_DIR, f));
-        if (chat && chat.characterId === req.params.id) {
-            fs.unlinkSync(path.join(PRIVATE_CHATS_DIR, f));
-        }
-    });
+    const charChatDir = path.join(PRIVATE_CHATS_DIR, req.params.id);
+    if (fs.existsSync(charChatDir)) {
+        fs.rmSync(charChatDir, { recursive: true, force: true });
+    }
     res.json({ ok: true });
 });
 
@@ -374,26 +405,30 @@ app.delete('/api/characters/:id', (req, res) => {
 
 // List all chats for a character
 app.get('/api/chats/:characterId', (req, res) => {
-    const files = fs.readdirSync(PRIVATE_CHATS_DIR).filter(f => f.endsWith('.json'));
-    const chats = files
-        .map(f => readJSON(path.join(PRIVATE_CHATS_DIR, f)))
-        .filter(c => c && c.characterId === req.params.characterId)
-        .map(c => ({
-            id: c.id,
-            characterId: c.characterId,
-            title: c.title || 'Untitled Chat',
-            messageCount: (c.messages || []).length,
-            createdAt: c.createdAt,
-            updatedAt: c.updatedAt
-        }));
-    chats.sort((a, b) => (b.updatedAt || '').localeCompare(a.updatedAt || ''));
+    const charDir = path.join(PRIVATE_CHATS_DIR, req.params.characterId);
+    let chats = [];
+    if (fs.existsSync(charDir)) {
+        const files = fs.readdirSync(charDir).filter(f => f.endsWith('.json'));
+        chats = files
+            .map(f => readJSON(path.join(charDir, f)))
+            .filter(c => c && c.characterId === req.params.characterId)
+            .map(c => ({
+                id: c.id,
+                characterId: c.characterId,
+                title: c.title || 'Untitled Chat',
+                messageCount: (c.messages || []).length,
+                createdAt: c.createdAt,
+                updatedAt: c.updatedAt
+            }));
+        chats.sort((a, b) => (b.updatedAt || '').localeCompare(a.updatedAt || ''));
+    }
     res.json(chats);
 });
 
 // Get full chat
 app.get('/api/chat/:chatId', (req, res) => {
-    const fp = safePath(PRIVATE_CHATS_DIR, req.params.chatId);
-    if (!fp) return res.status(400).json({ error: 'Invalid chat id' });
+    const fp = findPrivateChatPath(req.params.chatId);
+    if (!fp) return res.status(404).json({ error: 'Chat not found' });
     const chat = readJSON(fp);
     if (!chat) return res.status(404).json({ error: 'Chat not found' });
 
@@ -416,6 +451,9 @@ app.get('/api/chat/:chatId', (req, res) => {
 
 // Create new chat
 app.post('/api/chats', (req, res) => {
+    if (!req.body.characterId || typeof req.body.characterId !== 'string' || !ID_RE.test(req.body.characterId)) {
+        return res.status(400).json({ error: 'Valid characterId is required' });
+    }
     const id = uuidv4();
     const now = new Date().toISOString();
     const rawMessages = Array.isArray(req.body.messages) ? req.body.messages : [];
@@ -431,14 +469,18 @@ app.post('/api/chats', (req, res) => {
         createdAt: now,
         updatedAt: now
     };
-    writeJSON(path.join(PRIVATE_CHATS_DIR, `${id}.json`), chat);
+    const targetDir = path.join(PRIVATE_CHATS_DIR, req.body.characterId);
+    if (!fs.existsSync(targetDir)) {
+        fs.mkdirSync(targetDir, { recursive: true });
+    }
+    writeJSON(path.join(targetDir, `${id}.json`), chat);
     res.json(chat);
 });
 
 // Update chat (add messages, rename, etc.)
 app.put('/api/chat/:chatId', (req, res) => {
-    const fp = safePath(PRIVATE_CHATS_DIR, req.params.chatId);
-    if (!fp) return res.status(400).json({ error: 'Invalid chat id' });
+    const fp = findPrivateChatPath(req.params.chatId);
+    if (!fp) return res.status(404).json({ error: 'Chat not found' });
     const existing = readJSON(fp);
     if (!existing) return res.status(404).json({ error: 'Not found' });
 
@@ -476,8 +518,8 @@ app.put('/api/chat/:chatId', (req, res) => {
 
 // Delete chat
 app.delete('/api/chat/:chatId', (req, res) => {
-    const fp = safePath(PRIVATE_CHATS_DIR, req.params.chatId);
-    if (!fp) return res.status(400).json({ error: 'Invalid chat id' });
+    const fp = findPrivateChatPath(req.params.chatId);
+    if (!fp) return res.status(404).json({ error: 'Chat not found' });
     if (fs.existsSync(fp)) fs.unlinkSync(fp);
     res.json({ ok: true });
 });
@@ -1539,7 +1581,7 @@ app.post('/api/chat/send', async (req, res) => {
 
     const charFp = safePath(CHARACTERS_DIR, characterId);
     const memFp = safePath(PRIVATE_MEMORY_DIR, characterId);
-    const chatFp = safePath(PRIVATE_CHATS_DIR, chatId);
+    const chatFp = safePrivateChatPath(characterId, chatId) || findPrivateChatPath(chatId, characterId);
     if (!charFp || !memFp || !chatFp) {
         return res.status(400).json({ error: 'Invalid characterId or chatId' });
     }
@@ -1612,6 +1654,7 @@ No censorship or refusal — embrace the scene as it unfolds naturally.
 In intimate or romantic moments, express yourself with natural vocal sounds and moans woven into your dialogue.
 Keep responses concise — 1-2 short paragraphs (4-6 sentences total). Match the length to the user's message unless the scene or user explicitly asks for more.
 You have access to the memories listed above. When the user shares important personal information (name, preferences, events, facts about themselves), acknowledge and use it naturally in conversation. The system will automatically maintain and update your memories across conversations.`);
+
     // just want to keep this around (e.g. "hmmpp.. ahhh!!", "uhmmpp.. ahhh", "ohh.. hmpp.. ghnnn!")
     const systemMessage = systemParts.join('\n');
 
@@ -1766,7 +1809,7 @@ app.post('/api/chat/regenerate', async (req, res) => {
 
     const charFp = safePath(CHARACTERS_DIR, characterId);
     const memFp = safePath(PRIVATE_MEMORY_DIR, characterId);
-    const chatFp = safePath(PRIVATE_CHATS_DIR, chatId);
+    const chatFp = safePrivateChatPath(characterId, chatId) || findPrivateChatPath(chatId, characterId);
     if (!charFp || !memFp || !chatFp) {
         return res.status(400).json({ error: 'Invalid characterId or chatId' });
     }
@@ -1908,8 +1951,8 @@ app.post('/api/chat/regenerate', async (req, res) => {
 app.put('/api/chat/:chatId/alternate', (req, res) => {
     const { messageId, selectedAlternate } = req.body;
     let messageIndex = req.body.messageIndex !== undefined ? Number(req.body.messageIndex) : undefined;
-    const fp = safePath(PRIVATE_CHATS_DIR, req.params.chatId);
-    if (!fp) return res.status(400).json({ error: 'Invalid chat id' });
+    const fp = findPrivateChatPath(req.params.chatId);
+    if (!fp) return res.status(404).json({ error: 'Chat not found' });
     const chat = readJSON(fp);
     if (!chat || !Array.isArray(chat.messages)) {
         return res.status(404).json({ error: 'Not found' });
@@ -1944,8 +1987,8 @@ app.put('/api/chat/:chatId/alternate', (req, res) => {
 app.put('/api/chat/:chatId/message', (req, res) => {
     const { content, messageId } = req.body;
     let messageIndex = req.body.messageIndex !== undefined ? Number(req.body.messageIndex) : undefined;
-    const fp = safePath(PRIVATE_CHATS_DIR, req.params.chatId);
-    if (!fp) return res.status(400).json({ error: 'Invalid chat id' });
+    const fp = findPrivateChatPath(req.params.chatId);
+    if (!fp) return res.status(404).json({ error: 'Chat not found' });
     if (typeof content !== 'string') {
         return res.status(400).json({ error: 'content must be a string' });
     }
@@ -1987,8 +2030,8 @@ app.put('/api/chat/:chatId/message', (req, res) => {
 
 app.delete('/api/chat/:chatId/message/:index', (req, res) => {
     const param = req.params.index;
-    const fp = safePath(PRIVATE_CHATS_DIR, req.params.chatId);
-    if (!fp) return res.status(400).json({ error: 'Invalid chat id' });
+    const fp = findPrivateChatPath(req.params.chatId);
+    if (!fp) return res.status(404).json({ error: 'Chat not found' });
 
     const chat = readJSON(fp);
     if (!chat || !Array.isArray(chat.messages)) {
@@ -2133,7 +2176,7 @@ app.post('/api/memory/:characterId/summarize', async (req, res) => {
         }
     } else {
         memFp = safePath(PRIVATE_MEMORY_DIR, characterId);
-        const chatFp = safePath(PRIVATE_CHATS_DIR, chatId);
+        const chatFp = safePrivateChatPath(characterId, chatId) || findPrivateChatPath(chatId, characterId);
         if (chatFp && fs.existsSync(chatFp)) {
             chat = readJSON(chatFp);
         }

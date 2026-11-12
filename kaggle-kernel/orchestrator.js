@@ -534,7 +534,7 @@ async function startBetaKaggleOrchestrator(projectRoot) {
     orchestratorState.startedAt = Date.now();
     registerShutdownHooks();
 
-    logBox('🚀 BETA-KAGGLE AUTO-SERVER ORCHESTRATOR ', [
+    logBox('🚀 BETA-KAGGLE AUTO-SERVER ORCHESTRATOR', [
         'Mode     : Automated Kaggle GPU Kernel + Auto-Tunnel',
         'Watchdog : 30 Menit Auto-Idle + Shutdown saat Ctrl+C'
     ]);

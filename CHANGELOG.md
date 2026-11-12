@@ -3,6 +3,27 @@
 All notable changes to this project are documented here. Format loosely
 follows [Keep a Changelog](https://keepachangelog.com/).
 
+## [v1.7.1] — Per-Character Chat Storage Restructuring & Canceled Temporal Awareness
+
+Infrastructure and storage performance release introducing **Per-Character Private Chat Directory Reorganization (`data/chats/private/<characterId>/<chatId>.json`)**. The experimental Temporal Awareness system was tested, evaluated, and subsequently canceled/archived.
+
+### Canceled / Experimental (Archived to Branch `TemporalAwareness`)
+- **Real-World Temporal & Clock Awareness Engine (`server.js`)**:
+  - *Status:* **Canceled and preserved on branch `TemporalAwareness`** for future research and larger frontier models.
+  - *Rationale:* Real-world evaluation with local fine-tuned open-weight models (e.g., Gemma/Llama roleplay fine-tunes) revealed that system-level temporal anchors (`Current Date` and elapsed absence time) suffer from instruction over-indexing—causing the model to unpromptedly recite dates upon opening conversations (e.g. *"Sekarang hari Kamis, tanggal 12 November..."*)—and tokenizer year hallucinations (e.g. interpreting `2026` as `2066` or `20.26`), which broke character immersion.
+  - *Branch Access:* The full working implementation (including 2-tier cache-friendly architecture, 1-shot absence gap detection, group chat parity, and settings toggle) remains fully functional and accessible on git branch `TemporalAwareness` (`git checkout TemporalAwareness`).
+
+### Changed & Improved
+- **Per-Character Private Chat Directory Reorganization (`data/chats/private/<characterId>/<chatId>.json`)**:
+  - **Scoped Directory Structure**: Migrated all private chat session files from the root `data/chats/private/` directory into dedicated character subdirectories (`data/chats/private/<characterId>/<chatId>.json`).
+  - **High-Performance Scoped File Resolution**:
+    - Implemented `safePrivateChatPath(characterId, chatId)` and `findPrivateChatPath(chatId, characterId)`.
+    - Endpoint `GET /api/chats/:characterId` now reads only the target character's subfolder rather than filtering hundreds of global chat files, significantly reducing filesystem I/O.
+    - Endpoints `POST /api/chats`, `GET /api/chat/:chatId`, `PUT /api/chat/:chatId`, and `DELETE /api/chat/:chatId` fully support scoped subfolder storage.
+    - Character deletion (`DELETE /api/characters/:id`) cleanly removes the character's entire chat folder in one operation.
+
+---
+
 ## [v1.7.0] — Beta Kaggle Auto-Tunnel Orchestrator, Responsive Editorial UI & CUDA 12.8/13.0 (`llama.cpp` `b12076`)
 
 Major feature and infrastructure release introducing **1-command automated Kaggle GPU orchestration (`npm run beta-kaggle`)**, a complete **Responsive Digital Typography & Warm Editorial UI Redesign**, and an upgraded **Multi-Arch CUDA Prebuilt & Source Build Engine (`llama.cpp` `b12076` / `v0.8.0`)** compatible with Kaggle's newest NVIDIA Driver `580.178.04` (CUDA 13.0 host / CUDA 12.8.93 toolkit).
