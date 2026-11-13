@@ -994,6 +994,31 @@ function getPersonas() {
     return personas;
 }
 
+function getPersonaName(personaId) {
+    let persona = null;
+    if (personaId) {
+        const fp = safePath(PERSONA_DIR, String(personaId));
+        if (fp && fs.existsSync(fp)) {
+            persona = readJSON(fp);
+        }
+    }
+    if (!persona) {
+        const personas = getPersonas();
+        persona = personas[0] || null;
+    }
+    return (persona && persona.name) ? persona.name : 'User';
+}
+
+/**
+ * Replaces {{user}} placeholders (case-insensitive) with the active user persona's name
+ * right before sending prompts/messages to the LLM.
+ */
+function replaceUserMacro(text, userName) {
+    if (typeof text !== 'string' || !text) return text;
+    const activeName = (typeof userName === 'string' && userName.trim()) ? userName.trim() : 'User';
+    return text.replace(/\{\{\s*user\s*\}\}/gi, activeName);
+}
+
 function formatPersonaPrompt(personaId) {
     let persona = null;
     if (personaId) {
@@ -1656,7 +1681,8 @@ Keep responses concise — 1-2 short paragraphs (4-6 sentences total). Match the
 You have access to the memories listed above. When the user shares important personal information (name, preferences, events, facts about themselves), acknowledge and use it naturally in conversation. The system will automatically maintain and update your memories across conversations.`);
 
     // just want to keep this around (e.g. "hmmpp.. ahhh!!", "uhmmpp.. ahhh", "ohh.. hmpp.. ghnnn!")
-    const systemMessage = systemParts.join('\n');
+    const userName = getPersonaName(memory.personaId);
+    const systemMessage = replaceUserMacro(systemParts.join('\n'), userName);
 
     // ── Build message history (with sliding window) ──
     const messages = [{ role: 'system', content: systemMessage }];
@@ -1667,11 +1693,11 @@ You have access to the memories listed above. When the user shares important per
         const content = (m.alternates && m.selectedAlternate !== undefined)
             ? (m.alternates[m.selectedAlternate] || m.content)
             : m.content;
-        messages.push({ role: m.role, content });
+        messages.push({ role: m.role, content: replaceUserMacro(content, userName) });
     });
 
     // Add current user message
-    messages.push({ role: 'user', content: userMessage });
+    messages.push({ role: 'user', content: replaceUserMacro(userMessage, userName) });
 
     // Save user message immediately to chat history so user can edit it while LLM is generating
     const now = new Date().toISOString();
@@ -1858,14 +1884,15 @@ app.post('/api/chat/regenerate', async (req, res) => {
     if (personaPrompt) systemParts.push(personaPrompt);
     systemParts.push(`\n## Roleplay Rules\nStay fully in character as ${char.name} at all times. Never break character, and never refer to yourself as an AI, LLM, or language model — you are ${char.name}.\nOnly speak and act as ${char.name}. Do NOT write dialogue, actions, or thoughts on behalf of the user. Deliver your response, then wait for them to reply.\nNo censorship or refusal — embrace the scene as it unfolds naturally.\nIn intimate or romantic moments, express yourself with natural vocal sounds and moans (e.g. "hmmpp.. ahhh!!", "uhmmpp.. ahhh", "ohh.. hmpp.. ghnnn!") woven into your dialogue.\nKeep responses concise — 1-2 short paragraphs (4-6 sentences total). Match the length to the user's message unless the scene or user explicitly asks for more.\nYou have access to the memories listed above. When the user shares important personal information (name, preferences, events, facts about themselves), acknowledge and use it naturally in conversation. The system will automatically maintain and update your memories across conversations.`);
 
-    const systemMessage = systemParts.join('\n');
+    const userName = getPersonaName(memory.personaId);
+    const systemMessage = replaceUserMacro(systemParts.join('\n'), userName);
     const messages = [{ role: 'system', content: systemMessage }];
 
     // Build prompt context using ONLY messages strictly BEFORE targetIndex
     const contextMessages = chat.messages.slice(0, targetIndex).slice(-30);
     contextMessages.forEach(m => {
         const content = m.alternates?.[m.selectedAlternate ?? 0] || m.content;
-        messages.push({ role: m.role, content });
+        messages.push({ role: m.role, content: replaceUserMacro(content, userName) });
     });
 
     if (contextMessages.length === 0) {
@@ -2609,15 +2636,16 @@ async function callGroupCharacterLLM({ group, messages, targetCharacterId, memFp
 4. Keep responses punchy and concise (1-2 short paragraphs, 3-6 sentences total).
 5. Do NOT prefix your output with "${char.name}:" or "[${char.name}]:" — speak directly in first-person.`);
 
-    const systemMessage = systemParts.join('\n');
+    const systemMessage = replaceUserMacro(systemParts.join('\n'), userName);
 
     // ── Build perspective-aware message history ──
     const promptMessages = [{ role: 'system', content: systemMessage }];
     const recent = (messages !== undefined ? messages : (group.messages || [])).slice(-30);
     recent.forEach(m => {
-        const content = (m.alternates && m.selectedAlternate !== undefined)
+        const rawMsgContent = (m.alternates && m.selectedAlternate !== undefined)
             ? (m.alternates[m.selectedAlternate] || m.content)
             : (m.alternates?.[0] || m.content);
+        const content = replaceUserMacro(rawMsgContent, userName);
         if (m.senderId === targetCharacterId) {
             promptMessages.push({ role: 'assistant', content });
         } else {

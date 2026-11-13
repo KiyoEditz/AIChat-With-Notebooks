@@ -3,9 +3,13 @@
 All notable changes to this project are documented here. Format loosely
 follows [Keep a Changelog](https://keepachangelog.com/).
 
-## [v1.7.1] — Per-Character Chat Storage Restructuring & Canceled Temporal Awareness
+## [v1.7.1] — Per-Character Chat Storage Restructuring, `{{user}}` Macro Replacement & Canceled Temporal Awareness
 
-Infrastructure and storage performance release introducing **Per-Character Private Chat Directory Reorganization (`data/chats/private/<characterId>/<chatId>.json`)**. The experimental Temporal Awareness system was tested, evaluated, and subsequently canceled/archived.
+Infrastructure and storage performance release introducing **Per-Character Private Chat Directory Reorganization (`data/chats/private/<characterId>/<chatId>.json`)** and **Automatic `{{user}}` Persona Macro Replacement**. The experimental Temporal Awareness system was tested, evaluated, and subsequently canceled/archived.
+
+### Added
+- **Automatic `{{user}}` Persona Macro Replacement (`server.js`)**:
+  - Added `getPersonaName(personaId)` and `replaceUserMacro(text, userName)` to dynamically replace all `{{user}}` placeholders (case-insensitive, e.g. `{{user}}`, `{{User}}`, `{{USER}}`) with the active user persona's name across system prompts, character definitions, opening greetings, and message histories right before sending payloads to the LLM (for Private Chat, Regenerate, and Group Chat).
 
 ### Canceled / Experimental (Archived to Branch `TemporalAwareness`)
 - **Real-World Temporal & Clock Awareness Engine (`server.js`)**:
